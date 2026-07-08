@@ -3,9 +3,10 @@
 Parametric singing/audio synthesis pipeline. Solo project (Logan), moving from research
 experiments to a production-grade modular pipeline. **Current state: all major
 decisions resolved (see the Resolved tables in OPEN_QUESTIONS.md); Migration P0
-(packaging/skeleton) and P1 (manifest + acquire) completed 2026-07-07.** The design
-docs below are the source of truth. Next action: Migration Plan **P2** (Demucs
-separation — pulls PyTorch cu128 into the `train` extra).
+(packaging/skeleton), P1 (manifest + acquire), and P2 (Demucs separation) completed
+2026-07-07.** The design docs below are the source of truth. Next action: Migration
+Plan **P3** (cleaning stage). NOTE: the current dev box is a GTX 1650 machine, not the
+5090 rig — GPU-dependent verification is deferred to the rig (README "GPU install").
 
 Dev loop: `python -m uv sync` · `python -m uv run pytest` · `python -m uv run ruff
 check .` — all must pass before a phase is called done.

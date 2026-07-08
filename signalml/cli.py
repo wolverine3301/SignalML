@@ -24,7 +24,7 @@ STAGES: dict[str, tuple[str, str]] = {
     "render": ("P9", "render MIDI backing tracks (symbolic-first instrumental)"),
 }
 
-_IMPLEMENTED = {"manifest", "acquire"}
+_IMPLEMENTED = {"manifest", "acquire", "separate"}
 
 
 def _cmd_manifest_scan(args: argparse.Namespace) -> int:
@@ -65,6 +65,26 @@ def _cmd_acquire(args: argparse.Namespace) -> int:
           f"{len(summary.failed)} failed")
     for url, err in summary.failed.items():
         print(f"  FAILED {url}: {err}", file=sys.stderr)
+    return 0 if not summary.failed else 1
+
+
+def _cmd_separate(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .stages.separate import load_separate_config, separate
+
+    cfg = load_separate_config(args.config)
+    if args.model:
+        cfg = cfg.model_copy(update={"model": args.model})
+    if args.device:
+        cfg = cfg.model_copy(update={"device": args.device})
+
+    summary = separate(
+        resolve_data_root(args.data_root), cfg=cfg, force=args.force, limit=args.limit
+    )
+    print(f"separate: {len(summary.separated)} separated, "
+          f"{len(summary.skipped)} already done, {len(summary.failed)} failed")
+    for rid, err in summary.failed.items():
+        print(f"  FAILED {rid}: {err}", file=sys.stderr)
     return 0 if not summary.failed else 1
 
 
@@ -109,6 +129,17 @@ def main(argv: list[str] | None = None) -> int:
                            help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
     acquire_p.add_argument("--language", default=None, help="tag new records, e.g. en/ga/gd")
     acquire_p.set_defaults(func=_cmd_acquire)
+
+    # separate
+    separate_p = subparsers.add_parser("separate", help="[P2] Demucs stem separation")
+    separate_p.add_argument("--data-root", default=None,
+                            help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    separate_p.add_argument("--config", default=None, help="separate.yaml override path")
+    separate_p.add_argument("--model", default=None, help="demucs model (default from config)")
+    separate_p.add_argument("--device", default=None, choices=["auto", "cuda", "cpu"])
+    separate_p.add_argument("--force", action="store_true", help="re-separate finished songs")
+    separate_p.add_argument("--limit", type=int, default=None, help="max songs this run")
+    separate_p.set_defaults(func=_cmd_separate)
 
     for name in sorted(STAGES):
         if name not in _IMPLEMENTED:
