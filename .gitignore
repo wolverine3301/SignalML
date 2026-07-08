@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+uv.lock.tmp*
+
+# Data & artifacts — data lives outside the repo (DATA_ROOT), but belt-and-braces.
+# Root-anchored so they never swallow package dirs (e.g. signalml/voices/).
+/data/
+/raw/
+/songs/
+/datasets/
+/checkpoints/
+/voices/
+*.wav
+*.mp3
+*.flac
+*.npz
+!tests/fixtures/*.wav
+!tests/fixtures/*.npz
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
