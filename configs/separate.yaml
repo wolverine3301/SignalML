@@ -1,0 +1,6 @@
+# S3 stem separation (docs/PIPELINE_AND_CONTRACTS.md §S3).
+# htdemucs_ft = fine-tuned 4-model bag: best quality, ~4x slower than htdemucs.
+model: htdemucs_ft
+device: auto      # auto | cuda | cpu
+shifts: 1         # random-shift equivariant averaging (quality/time tradeoff)
+overlap: 0.25     # chunk overlap for split processing

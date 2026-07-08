@@ -6,11 +6,18 @@ from signalml.cli import STAGES, main
 
 
 def test_stub_stage_reports_migration_phase(capsys):
-    rc = main(["separate"])
+    rc = main(["clean"])
     assert rc == 2
     out = capsys.readouterr().out
     assert "not implemented" in out
-    assert "P2" in out
+    assert "P3" in out
+
+
+def test_separate_cli_idle_without_demucs(tmp_path, capsys):
+    # no manifest records -> no work -> must return 0 WITHOUT importing demucs/torch
+    rc = main(["separate", "--data-root", str(tmp_path)])
+    assert rc == 0
+    assert "0 separated" in capsys.readouterr().out
 
 
 def test_unknown_stage_rejected():

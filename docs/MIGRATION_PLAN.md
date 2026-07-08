@@ -76,7 +76,16 @@ Goal: the manifest is the single source of truth; downloads are reproducible.
 **Done when:** running `acquire` on a 2-URL list produces 2 raw files + 2 valid manifest
 records; re-running is a no-op; tests pass offline.
 
-## Phase 2 — Stem separation with Demucs (1 day)
+## Phase 2 — Stem separation with Demucs ✅ DONE 2026-07-07
+
+> Completed: `stages/separate.py` (manifest-driven, injectable separator, uniform stem
+> names, analysis.json model/version/device record, per-song manifest saves for
+> resumability), `stages/common.py` (analysis.json helper), `configs/separate.yaml`,
+> CLI `signalml separate` (idle runs never import torch), 9 offline tests (59 total).
+> **Verified end-to-end with real Demucs 4.0.1 (htdemucs) on CPU** — the dev box is a
+> GTX 1650/old-driver machine, not the 5090 rig, so the GPU run + htdemucs_ft default
+> happens on the rig (install path documented in README "GPU install"). CPU torch
+> wheels are what the `train` extra resolves by default on Windows.
 
 1. Add `demucs` to the `train` extra (it pulls torch; document the Windows CUDA 12.8
    wheel install line — `--index-url .../cu128` — in README).

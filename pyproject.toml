@@ -17,9 +17,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# torch/demucs/etc. join in Migration P2+ as stages actually need them
-# (RTX 5090 needs the CUDA 12.8 wheel index: https://download.pytorch.org/whl/cu128)
-train = []
+# PyPI resolves CPU torch wheels on Windows. On the RTX 5090 training rig, swap in
+# CUDA 12.8 wheels after sync (see README "GPU install"):
+#   python -m uv pip install --upgrade torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+train = [
+    "demucs>=4.0.1",
+    "torch>=2.7",
+    "torchaudio>=2.7",
+]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.4"]

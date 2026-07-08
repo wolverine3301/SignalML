@@ -21,8 +21,29 @@ Audio parameters come from `configs/audio.yaml` profiles (`dev` 22.05 kHz for fa
 testing, `prod` 44.1 kHz for real training) — select with `SIGNALML_AUDIO_PROFILE` or a
 `--profile` flag on stages. Never hardcode sample rates.
 
-GPU deps (PyTorch/Demucs) join in Migration P2; RTX 5090 needs the CUDA 12.8 wheel
-index (`https://download.pytorch.org/whl/cu128`).
+## GPU install (RTX 5090 training rig)
+
+The `train` extra installs Demucs + CPU torch wheels (PyPI default on Windows). On the
+5090 rig, swap in CUDA 12.8 wheels after syncing — Blackwell (sm_120) needs cu128:
+
+```powershell
+python -m uv sync --extra train
+python -m uv pip install --upgrade torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
+Then `signalml separate` picks the GPU automatically (`device: auto` in
+`configs/separate.yaml`). Requires a current NVIDIA driver (570+).
+
+## Typical corpus workflow (so far)
+
+```powershell
+# onboard existing audio (tag language/gender per corpus folder, Q13):
+python -m uv run signalml manifest scan --data-root D:\data --path raw\english --language en --gender F
+# download new audio:
+python -m uv run signalml acquire --urls urls.txt --data-root D:\data
+# separate stems (Demucs; resumable, idempotent):
+python -m uv run signalml separate --data-root D:\data
+```
 
 ## Layout
 

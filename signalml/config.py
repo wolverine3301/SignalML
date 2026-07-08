@@ -17,7 +17,8 @@ import yaml
 from pydantic import BaseModel
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_AUDIO_YAML = _REPO_ROOT / "configs" / "audio.yaml"
+CONFIGS_DIR = _REPO_ROOT / "configs"
+DEFAULT_AUDIO_YAML = CONFIGS_DIR / "audio.yaml"
 ENV_PROFILE = "SIGNALML_AUDIO_PROFILE"
 
 
