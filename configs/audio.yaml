@@ -1,0 +1,26 @@
+# The single source of truth for audio/spectrogram parameters (OPEN_QUESTIONS Q11).
+# Never hardcode sample rates or mel params in code — read the active profile via
+# signalml.config.active_profile(). Artifacts must record which profile produced them;
+# profiles never mix within a dataset or checkpoint (dev checkpoints are throwaway).
+default_profile: dev
+
+profiles:
+  # Fast pipeline testing (Logan's 22.05 kHz workflow).
+  dev:
+    sample_rate: 22050
+    mono: true
+    n_fft: 1024
+    hop_length: 256
+    win_length: 1024
+    n_mels: 128
+
+  # Real training runs — matches the NSF-HiFiGAN vocoder contract
+  # (docs/ARCHITECTURE.md §3.3).
+  prod:
+    sample_rate: 44100
+    mono: true
+    n_fft: 2048
+    hop_length: 512
+    win_length: 2048
+    n_mels: 128
+    fmax: 16000
