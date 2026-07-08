@@ -52,7 +52,14 @@ Goal: a modern, installable, linted, testable skeleton with the legacy code arch
 **Done when:** `uv sync && uv run pytest` passes; `uv run ruff check .` clean; repo tree
 matches the target layout; legacy files live only in `archive/`.
 
-## Phase 1 — Manifest + acquisition (1 day)
+## Phase 1 — Manifest + acquisition ✅ DONE 2026-07-07
+
+> Completed: `signalml/manifest.py` (pydantic JSONL records, atomic save, status
+> queries, sha256/url dedupe, `scan_directory` backfill with lyrics-sidecar detection
+> per Q14 and `--language/--gender/--singer` tagging per Q13), `stages/acquire.py`
+> (injectable downloader; yt-dlp native-container backend, no ffmpeg dependency), CLI
+> subcommands (`manifest scan`, `acquire`), 17 new offline tests (51 total). Real-
+> network smoke against actual YouTube URLs is left for Logan's first corpus run.
 
 Goal: the manifest is the single source of truth; downloads are reproducible.
 
