@@ -1,6 +1,7 @@
 """signalml CLI — stage entrypoints land phase by phase (docs/MIGRATION_PLAN.md).
 
-Every stage takes ``--profile`` (audio profile per Q11) once implemented.
+Implemented: ``manifest scan`` and ``acquire`` (P1). Everything else is a stub that
+reports which migration phase it lands in.
 """
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-# stage name -> (migration phase, one-line description)
+# stub stage name -> (migration phase, one-line description)
 STAGES: dict[str, tuple[str, str]] = {
     "acquire": ("P1", "download audio via yt-dlp into raw/ + manifest records"),
     "manifest": ("P1", "manifest utilities (scan/backfill)"),
@@ -23,22 +24,98 @@ STAGES: dict[str, tuple[str, str]] = {
     "render": ("P9", "render MIDI backing tracks (symbolic-first instrumental)"),
 }
 
+_IMPLEMENTED = {"manifest", "acquire"}
+
+
+def _cmd_manifest_scan(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root, scan_directory
+
+    data_root = resolve_data_root(args.data_root)
+    manifest, new_records = scan_directory(
+        data_root,
+        subpath=args.path,
+        language=args.language,
+        gender=args.gender,
+        singer=args.singer,
+    )
+    manifest.save()
+    print(f"Scanned {data_root / args.path}: {len(new_records)} new record(s), "
+          f"{len(manifest)} total in {manifest.path}")
+    missing_lyrics = [r.id for r in new_records if not r.meta.has_lyrics]
+    if missing_lyrics:
+        print(f"WARNING: {len(missing_lyrics)} new record(s) without a lyrics .txt sidecar: "
+              f"{', '.join(missing_lyrics[:10])}{' ...' if len(missing_lyrics) > 10 else ''}")
+    return 0
+
+
+def _cmd_acquire(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .stages.acquire import acquire, read_url_list
+
+    urls = list(args.url)
+    if args.urls:
+        urls.extend(read_url_list(args.urls))
+    if not urls:
+        print("acquire: no URLs given (pass URLs or --urls FILE)", file=sys.stderr)
+        return 1
+
+    summary = acquire(urls, resolve_data_root(args.data_root), language=args.language)
+    print(f"acquire: {len(summary.added)} added, "
+          f"{len(summary.skipped_known_url) + len(summary.skipped_known_checksum)} skipped, "
+          f"{len(summary.failed)} failed")
+    for url, err in summary.failed.items():
+        print(f"  FAILED {url}: {err}", file=sys.stderr)
+    return 0 if not summary.failed else 1
+
+
+def _add_stub(subparsers: argparse._SubParsersAction, name: str) -> None:
+    phase, desc = STAGES[name]
+    p = subparsers.add_parser(name, help=f"[{phase}] {desc}")
+    p.set_defaults(func=lambda _args, _n=name, _p=phase, _d=desc: _stub(_n, _p, _d))
+
+
+def _stub(name: str, phase: str, desc: str) -> int:
+    print(f"signalml {name}: not implemented yet ({desc}). "
+          f"Lands in Migration Plan {phase} - see docs/MIGRATION_PLAN.md.")
+    return 2
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="signalml",
         description="Parametric singing/audio synthesis pipeline.",
-        epilog="Stages are implemented phase by phase; see docs/MIGRATION_PLAN.md.",
     )
-    parser.add_argument("stage", choices=sorted(STAGES), help="pipeline stage to run")
-    args, _rest = parser.parse_known_args(argv)
+    subparsers = parser.add_subparsers(dest="stage", required=True)
 
-    phase, desc = STAGES[args.stage]
-    print(
-        f"signalml {args.stage}: not implemented yet ({desc}). "
-        f"Lands in Migration Plan {phase} - see docs/MIGRATION_PLAN.md."
+    # manifest scan
+    manifest_p = subparsers.add_parser("manifest", help="[P1] manifest utilities")
+    manifest_sub = manifest_p.add_subparsers(dest="command", required=True)
+    scan_p = manifest_sub.add_parser(
+        "scan", help="backfill manifest records for audio already under DATA_ROOT"
     )
-    return 2
+    scan_p.add_argument("--data-root", default=None,
+                        help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    scan_p.add_argument("--path", default="raw", help="subpath to scan (default: raw)")
+    scan_p.add_argument("--language", default=None, help="tag new records, e.g. en/ga/gd (Q13)")
+    scan_p.add_argument("--gender", default=None, choices=["F", "M"], help="tag new records")
+    scan_p.add_argument("--singer", default=None, help="tag new records")
+    scan_p.set_defaults(func=_cmd_manifest_scan)
+
+    # acquire
+    acquire_p = subparsers.add_parser("acquire", help="[P1] download audio via yt-dlp")
+    acquire_p.add_argument("url", nargs="*", help="URLs to download")
+    acquire_p.add_argument("--urls", default=None, help="file with one URL per line")
+    acquire_p.add_argument("--data-root", default=None,
+                           help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    acquire_p.add_argument("--language", default=None, help="tag new records, e.g. en/ga/gd")
+    acquire_p.set_defaults(func=_cmd_acquire)
+
+    for name in sorted(STAGES):
+        if name not in _IMPLEMENTED:
+            _add_stub(subparsers, name)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
 
 
 if __name__ == "__main__":

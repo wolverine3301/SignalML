@@ -27,11 +27,21 @@ def dev_audio_cfg(dev_profile) -> AudioConfig:
 
 
 @pytest.fixture()
-def sine_wav(tmp_path: Path, dev_audio_cfg: AudioConfig) -> Path:
+def make_wav(dev_audio_cfg: AudioConfig):
+    """Factory: write a sine WAV to an arbitrary path (parents auto-created)."""
+
+    def _make(path: Path, *, seconds: float = TONE_SEC, hz: float = TONE_HZ) -> Path:
+        sr = dev_audio_cfg.sample_rate
+        t = np.linspace(0, seconds, int(seconds * sr), endpoint=False)
+        y = (0.5 * np.sin(2 * np.pi * hz * t)).astype(np.float32)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(path), y, sr)
+        return path
+
+    return _make
+
+
+@pytest.fixture()
+def sine_wav(tmp_path: Path, make_wav) -> Path:
     """A 2-second 220 Hz sine WAV at the dev profile's sample rate."""
-    sr = dev_audio_cfg.sample_rate
-    t = np.linspace(0, TONE_SEC, int(TONE_SEC * sr), endpoint=False)
-    y = (0.5 * np.sin(2 * np.pi * TONE_HZ * t)).astype(np.float32)
-    path = tmp_path / "tone_220.wav"
-    sf.write(str(path), y, sr)
-    return path
+    return make_wav(tmp_path / "tone_220.wav")
