@@ -2,12 +2,13 @@
 
 Parametric singing/audio synthesis pipeline. Solo project (Logan), moving from research
 experiments to a production-grade modular pipeline. **Current state: all major
-decisions resolved (see the Resolved tables in OPEN_QUESTIONS.md); Migration P0–P3
-(packaging, manifest/acquire, Demucs separation, cleaning) completed 2026-07-07.** The
-design docs below are the source of truth. Next action: Migration Plan **P4**
-(features: mel/F0/BPM/key + in-memory chunking rewrite). NOTE: development happens on
-Logan's laptop (GTX 1650); heavy/GPU work runs later on the 5090 rig — clone the repo
-there and follow README "GPU install".
+decisions resolved (see the Resolved tables in OPEN_QUESTIONS.md); Migration P0–P4
+(packaging, manifest/acquire, separation, cleaning, features) completed 2026-07-07.**
+The design docs below are the source of truth. Next actions: Migration Plan **P5**
+(MFA alignment) and/or **P6** (score format) — they can proceed in parallel. NOTE:
+development happens on Logan's laptop (GTX 1650); heavy/GPU work runs later on the
+5090 rig — clone the repo there and follow README "GPU install". F0 note: RMVPE is
+not on PyPI; backends are pyin (default) / torchcrepe, with rmvpe vendored in P7.
 
 Dev loop: `python -m uv sync` · `python -m uv run pytest` · `python -m uv run ruff
 check .` — all must pass before a phase is called done.

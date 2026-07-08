@@ -26,6 +26,7 @@ train = [
     "demucs>=4.0.1",
     "torch>=2.7",
     "torchaudio>=2.7",
+    "torchcrepe>=0.0.22",
 ]
 
 [dependency-groups]
