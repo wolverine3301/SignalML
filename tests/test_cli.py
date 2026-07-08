@@ -6,11 +6,17 @@ from signalml.cli import STAGES, main
 
 
 def test_stub_stage_reports_migration_phase(capsys):
-    rc = main(["clean"])
+    rc = main(["align"])
     assert rc == 2
     out = capsys.readouterr().out
     assert "not implemented" in out
-    assert "P3" in out
+    assert "P5" in out
+
+
+def test_clean_cli_idle(tmp_path, capsys):
+    rc = main(["clean", "--data-root", str(tmp_path)])
+    assert rc == 0
+    assert "0 cleaned" in capsys.readouterr().out
 
 
 def test_separate_cli_idle_without_demucs(tmp_path, capsys):

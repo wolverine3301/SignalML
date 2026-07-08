@@ -99,7 +99,15 @@ records; re-running is a no-op; tests pass offline.
 **Done when:** one real song separates end-to-end on the 5090; fixture test passes on
 CPU; manifest reflects status; stems are uniformly named.
 
-## Phase 3 — Cleaning stage (1 day) ⫽ can run parallel with P5 prep
+## Phase 3 — Cleaning stage ✅ DONE 2026-07-07
+
+> Completed: `stages/clean.py` (profile resample+mono, pyloudnorm BS.1770 loudness to
+> target with peak ceiling, optional Butterworth high-pass, non-destructive silence map
+> into analysis.json; every op an independent flag; pure `process_audio` split from I/O
+> for property tests), `configs/clean.yaml`, CLI `signalml clean`, 11 offline tests
+> (70 total) incl. the ±1 LU acceptance check. De-click intentionally not implemented
+> (would need a real algorithm, not a placeholder) — documented as a future optional op.
+> Verified on the real P2 smoke song; analysis.json accumulates separate+clean sections.
 
 1. Implement S4 `signalml clean` per contract: resample→44.1k mono, pyloudnorm
    normalization (target LUFS in `clean.yaml`), optional high-pass, silence-map into
