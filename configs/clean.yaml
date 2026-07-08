@@ -1,0 +1,12 @@
+# S4 cleaning (docs/PIPELINE_AND_CONTRACTS.md §S4).
+# Every op is independently toggleable (brief requirement: modular & optional per-run).
+# Raw files and stems are never modified — output goes to songs/<id>/clean/.
+stems: [vocals]           # which stems to clean
+resample: true            # convert to the active audio profile's rate + mono (Q11)
+loudness_normalize: true  # pyloudnorm (ITU-R BS.1770) integrated loudness
+target_lufs: -23.0
+peak_ceiling_dbfs: -1.0   # post-gain safety clamp against clipping
+highpass: false           # optional rumble filter
+highpass_hz: 50.0
+silence_map: true         # non-destructive: intervals stored in analysis.json
+silence_top_db: 40.0

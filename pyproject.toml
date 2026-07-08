@@ -11,7 +11,9 @@ dependencies = [
     "librosa>=0.10",
     "soundfile>=0.12",
     "pydantic>=2.5",
+    "pyloudnorm>=0.1.1",
     "pyyaml>=6.0",
+    "scipy>=1.11",
     "tqdm>=4.66",
     "yt-dlp>=2025.1.1",
 ]

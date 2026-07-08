@@ -2,11 +2,12 @@
 
 Parametric singing/audio synthesis pipeline. Solo project (Logan), moving from research
 experiments to a production-grade modular pipeline. **Current state: all major
-decisions resolved (see the Resolved tables in OPEN_QUESTIONS.md); Migration P0
-(packaging/skeleton), P1 (manifest + acquire), and P2 (Demucs separation) completed
-2026-07-07.** The design docs below are the source of truth. Next action: Migration
-Plan **P3** (cleaning stage). NOTE: the current dev box is a GTX 1650 machine, not the
-5090 rig — GPU-dependent verification is deferred to the rig (README "GPU install").
+decisions resolved (see the Resolved tables in OPEN_QUESTIONS.md); Migration P0–P3
+(packaging, manifest/acquire, Demucs separation, cleaning) completed 2026-07-07.** The
+design docs below are the source of truth. Next action: Migration Plan **P4**
+(features: mel/F0/BPM/key + in-memory chunking rewrite). NOTE: development happens on
+Logan's laptop (GTX 1650); heavy/GPU work runs later on the 5090 rig — clone the repo
+there and follow README "GPU install".
 
 Dev loop: `python -m uv sync` · `python -m uv run pytest` · `python -m uv run ruff
 check .` — all must pass before a phase is called done.
