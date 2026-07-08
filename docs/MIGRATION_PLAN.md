@@ -117,7 +117,19 @@ CPU; manifest reflects status; stems are uniformly named.
 **Done when:** `clean` runs manifest-driven on separated songs; loudness verified within
 ±1 LU of target on fixtures.
 
-## Phase 4 — Features & analysis (1–2 days)
+## Phase 4 — Features & analysis ✅ DONE 2026-07-07
+
+> Completed: `audio/segment.py` rewritten (single-decode chunking — verified by a
+> decode-count test — plus gap-based silence-aware phrase segmentation with
+> min/max/pad handling), `stages/features.py` (named-key NPZ per contract with
+> profile/sr/hop/f0_method stamps and a profile-mismatch guard; log-mel base e;
+> frame-aligned f0/voicing/energy; KS key estimate + BPM/beat grid + phrase map into
+> analysis.json), `configs/features.yaml`, CLI `signalml features`, 17 new tests
+> (87 total). **Deviation from plan, documented:** RMVPE has no standalone PyPI
+> package (only heavy RVC bundles), so F0 is a backend abstraction — `pyin` default
+> (torch-free), `torchcrepe` in the train extra (both verified finding 220 Hz on
+> fixtures; torchcrepe verified on the real smoke song), `rmvpe` slot raises until
+> vendored with third_party/ in P7. Every artifact records its f0_method.
 
 1. Rewrite chunking as in-memory slicing in `audio/segment.py` (single decode; the O(n²)
    re-decode pattern in old `chunking.py`/`phonemes.py` must not survive). Add

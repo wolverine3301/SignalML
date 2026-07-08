@@ -24,7 +24,7 @@ STAGES: dict[str, tuple[str, str]] = {
     "render": ("P9", "render MIDI backing tracks (symbolic-first instrumental)"),
 }
 
-_IMPLEMENTED = {"manifest", "acquire", "separate", "clean"}
+_IMPLEMENTED = {"manifest", "acquire", "separate", "clean", "features"}
 
 
 def _cmd_manifest_scan(args: argparse.Namespace) -> int:
@@ -107,6 +107,29 @@ def _cmd_clean(args: argparse.Namespace) -> int:
     return 0 if not summary.failed else 1
 
 
+def _cmd_features(args: argparse.Namespace) -> int:
+    from .config import active_profile
+    from .manifest import resolve_data_root
+    from .stages.features import features, load_features_config
+
+    cfg = load_features_config(args.config)
+    if args.f0_method:
+        cfg = cfg.model_copy(update={"f0_method": args.f0_method})
+
+    summary = features(
+        resolve_data_root(args.data_root),
+        cfg=cfg,
+        profile=active_profile(args.profile),
+        force=args.force,
+        limit=args.limit,
+    )
+    print(f"features: {len(summary.featurized)} featurized, "
+          f"{len(summary.skipped)} skipped, {len(summary.failed)} failed")
+    for rid, err in summary.failed.items():
+        print(f"  FAILED {rid}: {err}", file=sys.stderr)
+    return 0 if not summary.failed else 1
+
+
 def _add_stub(subparsers: argparse._SubParsersAction, name: str) -> None:
     phase, desc = STAGES[name]
     p = subparsers.add_parser(name, help=f"[{phase}] {desc}")
@@ -170,6 +193,19 @@ def main(argv: list[str] | None = None) -> int:
     clean_p.add_argument("--force", action="store_true", help="re-clean finished songs")
     clean_p.add_argument("--limit", type=int, default=None, help="max songs this run")
     clean_p.set_defaults(func=_cmd_clean)
+
+    # features
+    features_p = subparsers.add_parser("features", help="[P4] mel/F0/BPM/key extraction")
+    features_p.add_argument("--data-root", default=None,
+                            help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    features_p.add_argument("--config", default=None, help="features.yaml override path")
+    features_p.add_argument("--profile", default=None,
+                            help="audio profile (default: $SIGNALML_AUDIO_PROFILE or yaml default)")
+    features_p.add_argument("--f0-method", default=None,
+                            choices=["pyin", "torchcrepe", "rmvpe"])
+    features_p.add_argument("--force", action="store_true", help="re-extract finished songs")
+    features_p.add_argument("--limit", type=int, default=None, help="max songs this run")
+    features_p.set_defaults(func=_cmd_features)
 
     for name in sorted(STAGES):
         if name not in _IMPLEMENTED:

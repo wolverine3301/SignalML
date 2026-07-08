@@ -1,0 +1,10 @@
+# S6 feature extraction (docs/PIPELINE_AND_CONTRACTS.md §S6).
+# Mel parameters come from the active audio profile (configs/audio.yaml) — never here.
+stem: vocals
+f0_method: pyin      # pyin (no torch needed) | torchcrepe (train extra) | rmvpe (vendored in P7)
+f0_min_hz: 65.0      # ~C2
+f0_max_hz: 1400.0    # soprano headroom
+analysis: true       # BPM / key / beat grid into analysis.json
+phrases: true        # silence-aware phrase map into analysis.json
+phrase_min_sec: 1.0
+phrase_max_sec: 15.0
