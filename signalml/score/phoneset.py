@@ -48,13 +48,18 @@ class PhoneSet:
         return ph in self.nuclei
 
 
+# Union of the english_us_mfa v3 inventory (US G2P output) and the installed general
+# english_mfa v3 dictionary (aligner output; adds pan-dialect phones: a/aː eː oː u/uː
+# ɔ ɛː ɜ/ɜː əw, retroflex ʈ/ʈʲ/ʈʷ/ɖ, kp ʋ ʎ) — verified 2026-07-12 against the
+# installed dict via `signalml score phoneset --dict`.
 _EN_V1_VOWELS = (
-    "aj aw e ej i iː ɪ o ow ɔj ə ɚ ɛ ɝ æ ɐ ɑ ɑː ɒ ɒː ʉ ʉː ʊ".split()
+    "a aː aj aw e eː ej i iː ɪ o oː ow ɔ ɔj u uː ə əw ɚ ɛ ɛː ɜ ɜː ɝ æ ɐ ɑ ɑː ɒ ɒː "
+    "ʉ ʉː ʊ".split()
 )
 _EN_V1_SYLLABIC_CONSONANTS = "m̩ n̩ ɫ̩".split()
 _EN_V1_CONSONANTS = (
-    "b bʲ c cʰ cʷ d dʒ dʲ d̪ f fʲ h j k kʰ kʷ l m mʲ n p pʰ pʲ pʷ s t tʃ tʰ tʲ tʷ t̪ "
-    "v vʲ w z ç ð ŋ ɟ ɟʷ ɡ ɡʷ ɫ ɱ ɲ ɹ ɾ ɾʲ ɾ̃ ʃ ʒ ʔ θ".split()
+    "b bʲ c cʰ cʷ d dʒ dʲ d̪ f fʲ h j k kp kʰ kʷ l m mʲ n p pʰ pʲ pʷ s t tʃ tʰ tʲ tʷ "
+    "t̪ v w z ç ð ŋ ɖ ɟ ɟʷ ɡ ɡʷ ɫ ɱ ɲ ɹ ɾ ɾʲ ɾ̃ vʲ ʃ ʈ ʈʲ ʈʷ ʋ ʒ ʔ θ ʎ".split()
 )
 
 MFA_IPA_EN_V1 = PhoneSet(
@@ -62,8 +67,10 @@ MFA_IPA_EN_V1 = PhoneSet(
     language="en",
     phones=frozenset(_EN_V1_VOWELS + _EN_V1_SYLLABIC_CONSONANTS + _EN_V1_CONSONANTS),
     nuclei=frozenset(_EN_V1_VOWELS + _EN_V1_SYLLABIC_CONSONANTS),
-    notes="Seeded from the english_us_mfa v3 dictionary inventory; verify against the "
-    "installed dictionary with `signalml score phoneset --dict <path>`.",
+    notes="Union of english_us_mfa v3 (G2P side) and the general english_mfa v3 "
+    "dictionary (aligner side); re-verify after any MFA model update with "
+    "`signalml score phoneset --dict <path>` and bump the version once artifacts "
+    "depend on it.",
 )
 
 _REGISTRY: dict[str, PhoneSet] = {MFA_IPA_EN_V1.name: MFA_IPA_EN_V1}

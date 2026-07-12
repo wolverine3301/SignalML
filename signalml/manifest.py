@@ -187,8 +187,34 @@ class Manifest:
 
 
 def _find_lyrics_sidecar(audio_path: Path) -> Path | None:
+    """``<audio-stem>.txt`` next to the audio, or ``lyrics.txt`` in its folder (the
+    corpus convention: one song per folder with lyrics.txt + META.txt siblings)."""
     candidate = audio_path.with_suffix(".txt")
-    return candidate if candidate.exists() else None
+    if candidate.exists():
+        return candidate
+    folder_lyrics = audio_path.parent / "lyrics.txt"
+    return folder_lyrics if folder_lyrics.exists() else None
+
+
+def _normalize_singer(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = " ".join(value.split()).lower()
+    return cleaned or None
+
+
+def _read_meta_sidecar(audio_path: Path) -> dict[str, str]:
+    """Parse a ``META.txt`` next to the audio (corpus convention): ``KEY:value`` lines
+    (SONG/SINGER/ARTIST/GENRE/TYPE/QUALITY). Empty values are dropped."""
+    meta_path = audio_path.parent / "META.txt"
+    if not meta_path.exists():
+        return {}
+    out: dict[str, str] = {}
+    for line in meta_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        key, sep, val = line.partition(":")
+        if sep and val.strip():
+            out[key.strip().upper()] = val.strip()
+    return out
 
 
 def scan_directory(
@@ -222,6 +248,7 @@ def scan_directory(
 
         duration, sr, channels = probe_audio(path)
         lyrics = _find_lyrics_sidecar(path)
+        sidecar = _read_meta_sidecar(path)  # per-song META.txt beats the blanket CLI tags
         rec = ManifestRecord(
             id=manifest.next_id(),
             source=SourceInfo(kind="local"),
@@ -233,10 +260,12 @@ def scan_directory(
                 channels=channels,
             ),
             meta=MetaInfo(
-                song=path.stem,
+                song=sidecar.get("SONG") or path.stem,
                 language=language,
                 gender=gender,
-                singer=singer,
+                # singer is the timbre-space label key (ARCHITECTURE §4): normalize
+                # case/whitespace so "RUNN" and "runn" are one singer, not two
+                singer=_normalize_singer(sidecar.get("SINGER") or singer),
                 has_lyrics=lyrics is not None,
                 lyrics_path=lyrics.relative_to(data_root).as_posix() if lyrics else None,
                 source_quality=source_quality,
