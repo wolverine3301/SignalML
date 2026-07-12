@@ -144,7 +144,20 @@ CPU; manifest reflects status; stems are uniformly named.
 **Done when:** features exist for all cleaned fixture+real songs; frame-alignment test
 passes; no anonymous `arr_0` keys anywhere.
 
-## Phase 5 — Alignment / phonemization (2–3 days; **Q2 decided: MFA + IPA**)
+## Phase 5 — Alignment / phonemization ✅ CODE DONE 2026-07-12 (corpus runs pending)
+
+> Completed: `stages/align.py` (manifest-driven, one batched MFA invocation via
+> injectable runner, corpus staged per-song-as-speaker, TextGrid audit copy kept,
+> praatio converter → `align/phones.json` with strict phone-set validation, v1
+> alignment-confidence heuristic = speech_sec/voiced_sec recorded to
+> `quality.align_score`), `configs/align.yaml`, `score/phoneset.py` (versioned
+> `mfa_ipa/en_v1` seeded from the english_us_mfa v3 inventory + `signalml score
+> phoneset --dict` verifier), CLI `signalml align`, README MFA-install section,
+> legacy `ingest/textgrid.py`+`phonemes.py` (+ their `phoneme_jobs` consumers)
+> archived, `manifest report` census command + `meta.source_quality` field added.
+> **Still needs the real corpus/rig:** MFA conda install + phone-set verify (README
+> steps), first real alignment runs + spot-check listening, the SOFA eval (P5.4),
+> and the lyrics-coverage verification pass over the N h corpus (P5.2).
 
 1. Document **native-Windows MFA install** (conda env `aligner`, conda-forge package) in
    README, including the known-fragility note and both fallbacks (SOFA; MFA-only WSL2
@@ -178,7 +191,17 @@ passes; no anonymous `arr_0` keys anywhere.
 listening to sliced phonemes); lyrics-coverage report exists; aligner eval note written;
 old parser deleted.
 
-## Phase 6 — Score format + importers (2 days) ⫽ parallel with P5
+## Phase 6 — Score format + importers ✅ DONE 2026-07-12
+
+> Completed: `score/schema.py` (pydantic `signalml-score/0.1`; slur convention =
+> continuation notes carry same syllable + empty phonemes; validators for overlap/
+> sort/slur/key), `score/g2p.py` (backend abstraction: LexiconG2P → MfaG2P
+> (`mfa g2p`, preferred, batch + cache, injectable runner) → EspeakG2P (phonemizer,
+> experimental, normalization table); max-onset `syllabify`; stress as separate
+> field), `score/from_midi.py` (tempo-map-accurate tick→sec, monophonic enforcement,
+> hyphen/`-`-melisma lyric tokens, per-occurrence syllable-count check),
+> `from_musicxml.py` stub with implementer notes, CLI `signalml score
+> validate|from-midi|phoneset`, golden MIDI→score test + 40 new tests overall.
 
 1. Implement `score/schema.py` (pydantic, `signalml-score/0.1` per contracts §4) +
    validation CLI `signalml score validate`.

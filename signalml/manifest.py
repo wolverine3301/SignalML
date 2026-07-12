@@ -51,6 +51,9 @@ class MetaInfo(BaseModel):
     license_note: str | None = None
     has_lyrics: bool = False  # Q14: .txt sidecar next to the audio
     lyrics_path: str | None = None
+    # "studio" = real dry stems (gold for vocoder training); "separated" = Demucs output
+    # with the mix's production baked in. Dataset recipes filter/weight on this.
+    source_quality: Literal["studio", "separated"] | None = None
 
 
 class StatusFlags(BaseModel):
@@ -195,6 +198,7 @@ def scan_directory(
     language: str | None = None,
     gender: Literal["F", "M"] | None = None,
     singer: str | None = None,
+    source_quality: Literal["studio", "separated"] | None = None,
 ) -> tuple[Manifest, list[ManifestRecord]]:
     """Backfill manifest records for audio files already under ``data_root/subpath``.
 
@@ -235,9 +239,57 @@ def scan_directory(
                 singer=singer,
                 has_lyrics=lyrics is not None,
                 lyrics_path=lyrics.relative_to(data_root).as_posix() if lyrics else None,
+                source_quality=source_quality,
             ),
         )
         manifest.add(rec)
         new_records.append(rec)
 
     return manifest, new_records
+
+
+def _hours(records: list[ManifestRecord]) -> float:
+    return round(sum(r.file.duration_sec or 0.0 for r in records) / 3600, 2)
+
+
+def manifest_report(manifest: Manifest) -> str:
+    """Corpus census: the numbers that shape training decisions (ARCHITECTURE §4/§7).
+
+    Singer *count* is the load-bearing one — it decides whether the voice-bank
+    sampling space produces novel voices or blends. Also reports lyrics coverage
+    (Q14 verification pass), language/gender/source-quality splits, and stage status.
+    """
+    recs = manifest.records
+    lines = [f"records: {len(recs)}   hours: {_hours(recs)}"]
+
+    def group(title: str, key) -> None:
+        buckets: dict[str, list[ManifestRecord]] = {}
+        for r in recs:
+            buckets.setdefault(key(r) or "(untagged)", []).append(r)
+        lines.append(f"\n{title}:")
+        for name in sorted(buckets):
+            b = buckets[name]
+            lines.append(f"  {name}: {len(b)} song(s), {_hours(b)} h")
+
+    group("by language", lambda r: r.meta.language)
+    group("by gender", lambda r: r.meta.gender)
+    group("by source quality", lambda r: r.meta.source_quality)
+    group("by singer (voice-bank census)", lambda r: r.meta.singer)
+
+    n_singers = len({r.meta.singer for r in recs if r.meta.singer})
+    untagged = sum(1 for r in recs if not r.meta.singer)
+    lines.append(f"\ndistinct singers: {n_singers}"
+                 + (f"   (WARNING: {untagged} record(s) missing singer — "
+                    f"the timbre space needs singer labels)" if untagged else ""))
+
+    missing_lyrics = [r.id for r in recs if not r.meta.has_lyrics]
+    lines.append(f"lyrics coverage: {len(recs) - len(missing_lyrics)}/{len(recs)}")
+    if missing_lyrics:
+        lines.append(f"  missing: {', '.join(missing_lyrics[:20])}"
+                     + (" ..." if len(missing_lyrics) > 20 else ""))
+
+    lines.append("\nstage status:")
+    for flag in StatusFlags.model_fields:
+        done = sum(1 for r in recs if getattr(r.status, flag))
+        lines.append(f"  {flag}: {done}/{len(recs)}")
+    return "\n".join(lines)

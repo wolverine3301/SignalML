@@ -6,11 +6,30 @@ from signalml.cli import STAGES, main
 
 
 def test_stub_stage_reports_migration_phase(capsys):
-    rc = main(["align"])
+    rc = main(["train"])
     assert rc == 2
     out = capsys.readouterr().out
     assert "not implemented" in out
-    assert "P5" in out
+    assert "P7" in out
+
+
+def test_align_cli_idle(tmp_path, capsys):
+    rc = main(["align", "--data-root", str(tmp_path)])
+    assert rc == 0
+    assert "0 aligned" in capsys.readouterr().out
+
+
+def test_manifest_report_cli(tmp_path, make_wav, capsys):
+    make_wav(tmp_path / "raw" / "song.wav")
+    (tmp_path / "raw" / "song.txt").write_text("words", encoding="utf-8")
+    main(["manifest", "scan", "--data-root", str(tmp_path), "--language", "en",
+          "--gender", "F", "--singer", "alice", "--source-quality", "studio"])
+    rc = main(["manifest", "report", "--data-root", str(tmp_path)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "distinct singers: 1" in out
+    assert "studio: 1 song(s)" in out
+    assert "lyrics coverage: 1/1" in out
 
 
 def test_clean_cli_idle(tmp_path, capsys):

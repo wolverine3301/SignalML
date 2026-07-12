@@ -1,0 +1,14 @@
+# S5 alignment (Q2: MFA with the IPA phone set; docs/PIPELINE_AND_CONTRACTS.md §S5).
+# MFA runs in its own conda env ("aligner") — see README "Alignment (MFA) install".
+# SOFA is the fallback aligner (P5.4 head-to-head eval decides the default).
+language: en
+phone_set: mfa_ipa/en_v1
+acoustic_model: english_mfa
+dictionary: english_mfa
+# how to invoke mfa; default goes through conda so the pipeline env stays torch-clean
+mfa_command: ["conda", "run", "-n", "aligner", "--no-capture-output", "mfa"]
+beam: 100
+retry_beam: 400
+num_jobs: 4
+# reject songs whose alignment contains phones outside the declared phone set
+strict_phones: true
