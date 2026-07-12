@@ -16,6 +16,7 @@ STAGES: dict[str, tuple[str, str]] = {
     "separate": ("P2", "stem separation with Demucs htdemucs_ft"),
     "clean": ("P3", "resample/loudness-normalize/filter vocal stems"),
     "align": ("P5", "MFA alignment -> align/phones.json (MFA IPA)"),
+    "score": ("P6", "score JSON tools: validate / from-midi / phoneset"),
     "features": ("P4", "mel/F0/BPM/key feature extraction"),
     "dataset": ("P7", "build binarized training datasets from the manifest"),
     "train": ("P7", "train acoustic/variance/vocoder models"),
@@ -24,7 +25,7 @@ STAGES: dict[str, tuple[str, str]] = {
     "render": ("P9", "render MIDI backing tracks (symbolic-first instrumental)"),
 }
 
-_IMPLEMENTED = {"manifest", "acquire", "separate", "clean", "features"}
+_IMPLEMENTED = {"manifest", "acquire", "separate", "clean", "features", "align", "score"}
 
 
 def _cmd_manifest_scan(args: argparse.Namespace) -> int:
@@ -37,6 +38,7 @@ def _cmd_manifest_scan(args: argparse.Namespace) -> int:
         language=args.language,
         gender=args.gender,
         singer=args.singer,
+        source_quality=args.source_quality,
     )
     manifest.save()
     print(f"Scanned {data_root / args.path}: {len(new_records)} new record(s), "
@@ -130,6 +132,97 @@ def _cmd_features(args: argparse.Namespace) -> int:
     return 0 if not summary.failed else 1
 
 
+def _cmd_manifest_report(args: argparse.Namespace) -> int:
+    from .manifest import Manifest, manifest_report, resolve_data_root
+
+    manifest = Manifest.for_data_root(resolve_data_root(args.data_root))
+    print(manifest_report(manifest))
+    return 0
+
+
+def _cmd_align(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .stages.align import align, load_align_config
+
+    summary = align(
+        resolve_data_root(args.data_root),
+        cfg=load_align_config(args.config),
+        force=args.force,
+        limit=args.limit,
+    )
+    print(f"align: {len(summary.aligned)} aligned, "
+          f"{len(summary.skipped)} skipped, {len(summary.failed)} failed")
+    for rid, err in summary.failed.items():
+        print(f"  FAILED {rid}: {err}", file=sys.stderr)
+    return 0 if not summary.failed else 1
+
+
+def _cmd_score_validate(args: argparse.Namespace) -> int:
+    from .score import validate_score_file
+
+    bad = 0
+    for path in args.score:
+        problems = validate_score_file(path)
+        if problems:
+            bad += 1
+            print(f"INVALID {path}:")
+            for p in problems:
+                print(f"  - {p}")
+        else:
+            print(f"ok {path}")
+    return 0 if not bad else 1
+
+
+def _cmd_score_from_midi(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from .score import ChainG2P, EspeakG2P, LexiconG2P, MfaG2P, save_score, score_from_midi
+
+    backends = []
+    if args.lexicon:
+        backends.append(LexiconG2P(path=args.lexicon))
+    if args.g2p == "mfa":
+        backends.append(MfaG2P(args.g2p_model, phone_set=args.phone_set))
+    elif args.g2p == "espeak":
+        backends.append(EspeakG2P(phone_set=args.phone_set))
+    if not backends:
+        print("score from-midi: need --lexicon and/or --g2p mfa|espeak", file=sys.stderr)
+        return 1
+
+    score = score_from_midi(
+        args.midi,
+        Path(args.lyrics).read_text(encoding="utf-8"),
+        g2p=ChainG2P(*backends),
+        language=args.language,
+        phone_set=args.phone_set,
+        track=args.track,
+    )
+    out = Path(args.out) if args.out else Path(args.midi).with_name("score.json")
+    save_score(score, out)
+    print(f"wrote {out} ({len(score.notes)} notes, bpm {score.bpm}, key {score.key})")
+    return 0
+
+
+def _cmd_score_phoneset(args: argparse.Namespace) -> int:
+    from .score.phoneset import diff_against_mfa_dictionary, get_phone_set
+
+    ps = get_phone_set(args.name)
+    if not args.dict:
+        print(f"{ps.name} ({ps.language}): {len(ps.phones)} phones")
+        print(" ".join(sorted(ps.phones)))
+        print(f"note: {ps.notes}")
+        return 0
+    diff = diff_against_mfa_dictionary(ps, args.dict)
+    print(f"dictionary phones: {len(diff.dictionary_phones)}")
+    if diff.missing_from_set:
+        print(f"MISSING from {ps.name} (aligner output would be rejected!): "
+              f"{' '.join(diff.missing_from_set)}")
+    if diff.unused_by_dict:
+        print(f"in {ps.name} but unused by this dictionary: {' '.join(diff.unused_by_dict)}")
+    print("clean" if diff.clean else "MISMATCH — update phoneset.py and bump the version")
+    return 0 if diff.clean else 1
+
+
 def _add_stub(subparsers: argparse._SubParsersAction, name: str) -> None:
     phase, desc = STAGES[name]
     p = subparsers.add_parser(name, help=f"[{phase}] {desc}")
@@ -161,7 +254,15 @@ def main(argv: list[str] | None = None) -> int:
     scan_p.add_argument("--language", default=None, help="tag new records, e.g. en/ga/gd (Q13)")
     scan_p.add_argument("--gender", default=None, choices=["F", "M"], help="tag new records")
     scan_p.add_argument("--singer", default=None, help="tag new records")
+    scan_p.add_argument("--source-quality", default=None, choices=["studio", "separated"],
+                        help="tag new records: studio stems vs to-be-Demucs'd mixes")
     scan_p.set_defaults(func=_cmd_manifest_scan)
+    report_p = manifest_sub.add_parser(
+        "report", help="corpus census: singers/hours/languages/lyrics coverage/status"
+    )
+    report_p.add_argument("--data-root", default=None,
+                          help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    report_p.set_defaults(func=_cmd_manifest_report)
 
     # acquire
     acquire_p = subparsers.add_parser("acquire", help="[P1] download audio via yt-dlp")
@@ -206,6 +307,47 @@ def main(argv: list[str] | None = None) -> int:
     features_p.add_argument("--force", action="store_true", help="re-extract finished songs")
     features_p.add_argument("--limit", type=int, default=None, help="max songs this run")
     features_p.set_defaults(func=_cmd_features)
+
+    # align
+    align_p = subparsers.add_parser("align", help="[P5] MFA alignment -> align/phones.json")
+    align_p.add_argument("--data-root", default=None,
+                         help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    align_p.add_argument("--config", default=None, help="align.yaml override path")
+    align_p.add_argument("--force", action="store_true", help="re-align finished songs")
+    align_p.add_argument("--limit", type=int, default=None, help="max songs this run")
+    align_p.set_defaults(func=_cmd_align)
+
+    # score
+    score_p = subparsers.add_parser("score", help="[P6] score JSON tools")
+    score_sub = score_p.add_subparsers(dest="command", required=True)
+    validate_p = score_sub.add_parser("validate", help="validate score.json files")
+    validate_p.add_argument("score", nargs="+", help="score.json path(s)")
+    validate_p.set_defaults(func=_cmd_score_validate)
+    from_midi_p = score_sub.add_parser(
+        "from-midi", help="MIDI + syllabified lyrics -> score.json"
+    )
+    from_midi_p.add_argument("midi", help="MIDI file (monophonic melody track)")
+    from_midi_p.add_argument("--lyrics", required=True,
+                             help="lyrics text file (hyphenate syllables; '-' = melisma)")
+    from_midi_p.add_argument("--out", default=None, help="output path (default: score.json)")
+    from_midi_p.add_argument("--lexicon", default=None,
+                             help="JSON lexicon path (checked before --g2p backend)")
+    from_midi_p.add_argument("--g2p", default="mfa", choices=["mfa", "espeak", "none"],
+                             help="automatic G2P backend (default: mfa)")
+    from_midi_p.add_argument("--g2p-model", default="english_us_mfa",
+                             help="MFA G2P model name (default: english_us_mfa)")
+    from_midi_p.add_argument("--language", default="en")
+    from_midi_p.add_argument("--phone-set", default="mfa_ipa/en_v1")
+    from_midi_p.add_argument("--track", type=int, default=None,
+                             help="melody track index (default: first with notes)")
+    from_midi_p.set_defaults(func=_cmd_score_from_midi)
+    phoneset_p = score_sub.add_parser(
+        "phoneset", help="show a phone set / diff it against an MFA dictionary"
+    )
+    phoneset_p.add_argument("--name", default="mfa_ipa/en_v1")
+    phoneset_p.add_argument("--dict", default=None,
+                            help="installed MFA .dict file to verify against")
+    phoneset_p.set_defaults(func=_cmd_score_phoneset)
 
     for name in sorted(STAGES):
         if name not in _IMPLEMENTED:

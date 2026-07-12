@@ -1,0 +1,54 @@
+{
+  "format": "signalml-score/0.1",
+  "bpm": 120.0,
+  "key": "G:major",
+  "language": "en",
+  "phone_set": "mfa_ipa/en_v1",
+  "notes": [
+    {
+      "start": 0.0,
+      "end": 0.5,
+      "midi": 67,
+      "syllable": "shin",
+      "phonemes": ["ʃ", "aj"],
+      "stress": 1,
+      "slur": false
+    },
+    {
+      "start": 0.5,
+      "end": 1.0,
+      "midi": 69,
+      "syllable": "ing",
+      "phonemes": ["n", "ɪ", "ŋ"],
+      "stress": 0,
+      "slur": false
+    },
+    {
+      "start": 1.0,
+      "end": 2.0,
+      "midi": 71,
+      "syllable": "ing",
+      "phonemes": [],
+      "stress": null,
+      "slur": true
+    },
+    {
+      "start": 2.0,
+      "end": 2.5,
+      "midi": 74,
+      "syllable": "star",
+      "phonemes": ["s", "t", "ɑː", "ɹ"],
+      "stress": 1,
+      "slur": false
+    },
+    {
+      "start": 2.5,
+      "end": 3.0,
+      "midi": 67,
+      "syllable": "on",
+      "phonemes": ["ɑ", "n"],
+      "stress": 0,
+      "slur": false
+    }
+  ]
+}

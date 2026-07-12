@@ -3,9 +3,11 @@
 Parametric singing/audio synthesis pipeline. Solo project (Logan), moving from research
 experiments to a production-grade modular pipeline. **Current state: all major
 decisions resolved (see the Resolved tables in OPEN_QUESTIONS.md); Migration P0–P4
-(packaging, manifest/acquire, separation, cleaning, features) completed 2026-07-07.**
-The design docs below are the source of truth. Next actions: Migration Plan **P5**
-(MFA alignment) and/or **P6** (score format) — they can proceed in parallel. NOTE:
+completed 2026-07-07; P5 (align) code + P6 (score format) completed 2026-07-12 —
+P5's corpus work (MFA install, real alignment runs, SOFA eval) still needs the
+dataset/rig.** The design docs below are the source of truth. Next actions: onboard
+the corpus (`manifest scan`/`report`, singer census), run P2–P5 over it, then **P7**
+(training + own vocoder; start vocoder as soon as clean stems exist). NOTE:
 development happens on Logan's laptop (GTX 1650); heavy/GPU work runs later on the
 5090 rig — clone the repo there and follow README "GPU install". F0 note: RMVPE is
 not on PyPI; backends are pyin (default) / torchcrepe, with rmvpe vendored in P7.

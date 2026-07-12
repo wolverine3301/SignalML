@@ -5,7 +5,8 @@ align → featurize → train → sing, with a persistable "voice bank" of novel
 voices. Design docs live in `docs/` (start with `docs/ARCHITECTURE.md`); decisions and
 their history in `OPEN_QUESTIONS.md`; execution plan in `docs/MIGRATION_PLAN.md`.
 
-**Status:** Migration P0 (packaging/skeleton) done; pipeline stages land phase by phase.
+**Status:** Migration P0–P6 done (packaging, manifest/acquire, separation, cleaning,
+features, alignment, score format); next: P7 (training + own vocoder).
 
 ## Setup (Windows-first)
 
@@ -34,15 +35,48 @@ python -m uv pip install --upgrade torch torchaudio --index-url https://download
 Then `signalml separate` picks the GPU automatically (`device: auto` in
 `configs/separate.yaml`). Requires a current NVIDIA driver (570+).
 
+## Alignment (MFA) install
+
+MFA is the one tool that does not live in the uv env — it gets its own conda env
+(historically the most install-fragile piece of the stack; ARCHITECTURE §2):
+
+```powershell
+# 1. install Miniconda (or Miniforge), then:
+conda create -n aligner -c conda-forge montreal-forced-aligner
+conda run -n aligner mfa model download acoustic english_mfa
+conda run -n aligner mfa model download dictionary english_mfa
+conda run -n aligner mfa model download g2p english_us_mfa
+# 2. verify the pipeline's phone set matches the installed dictionary:
+python -m uv run signalml score phoneset --dict "$env:USERPROFILE\Documents\MFA\pretrained_models\dictionary\english_mfa.dict"
+```
+
+`signalml align` drives MFA through `conda run -n aligner mfa ...` (configurable via
+`mfa_command` in `configs/align.yaml`), keeps the aligner-native TextGrid for audit,
+and converts to the pipeline-native `align/phones.json` (MFA IPA phone set, Q2).
+
+If MFA won't install or aligns sung vowels poorly, the fallbacks are (in order):
+**SOFA** (PyTorch singing-oriented aligner — P5.4 runs a head-to-head eval) and an
+MFA-only WSL2 Ubuntu env sharing the data directory (ARCHITECTURE §2).
+
 ## Typical corpus workflow (so far)
 
 ```powershell
-# onboard existing audio (tag language/gender per corpus folder, Q13):
-python -m uv run signalml manifest scan --data-root D:\data --path raw\english --language en --gender F
+# onboard existing audio (tag language/gender/source per corpus folder, Q13):
+python -m uv run signalml manifest scan --data-root D:\data --path raw\english --language en --gender F --source-quality separated
+# corpus census: singers (voice-bank census), hours, lyrics coverage, stage status:
+python -m uv run signalml manifest report --data-root D:\data
 # download new audio:
 python -m uv run signalml acquire --urls urls.txt --data-root D:\data
 # separate stems (Demucs; resumable, idempotent):
 python -m uv run signalml separate --data-root D:\data
+# clean + featurize (profile-aware):
+python -m uv run signalml clean --data-root D:\data
+python -m uv run signalml features --data-root D:\data
+# align (needs the MFA conda env, see above):
+python -m uv run signalml align --data-root D:\data
+# build a score from MIDI + syllabified lyrics ("shin-ing - star"; '-' holds a note):
+python -m uv run signalml score from-midi verse.mid --lyrics verse.txt --out score.json
+python -m uv run signalml score validate score.json
 ```
 
 ## Layout
