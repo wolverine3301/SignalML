@@ -223,6 +223,15 @@ def _cmd_score_phoneset(args: argparse.Namespace) -> int:
     return 0 if diff.clean else 1
 
 
+def _cmd_dash(args: argparse.Namespace) -> int:
+    from .dash.server import serve
+    from .manifest import resolve_data_root
+
+    serve(resolve_data_root(args.data_root), host=args.host, port=args.port,
+          open_browser=not args.no_open)
+    return 0
+
+
 def _add_stub(subparsers: argparse._SubParsersAction, name: str) -> None:
     phase, desc = STAGES[name]
     p = subparsers.add_parser(name, help=f"[{phase}] {desc}")
@@ -236,6 +245,10 @@ def _stub(name: str, phase: str, desc: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # IPA phones must survive Windows' legacy cp1252 console (score/phoneset output)
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         prog="signalml",
         description="Parametric singing/audio synthesis pipeline.",
@@ -348,6 +361,16 @@ def main(argv: list[str] | None = None) -> int:
     phoneset_p.add_argument("--dict", default=None,
                             help="installed MFA .dict file to verify against")
     phoneset_p.set_defaults(func=_cmd_score_phoneset)
+
+    # dash
+    dash_p = subparsers.add_parser("dash", help="live pipeline monitoring dashboard")
+    dash_p.add_argument("--data-root", default=None,
+                        help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    dash_p.add_argument("--host", default="127.0.0.1")
+    dash_p.add_argument("--port", type=int, default=8765)
+    dash_p.add_argument("--no-open", action="store_true",
+                        help="don't open the browser automatically")
+    dash_p.set_defaults(func=_cmd_dash)
 
     for name in sorted(STAGES):
         if name not in _IMPLEMENTED:

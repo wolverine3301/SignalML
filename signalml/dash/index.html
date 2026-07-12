@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SignalML — Mission Control</title>
+<style>
+  :root {
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --ink-3: #898781;
+    --grid: #2c2c2a;
+    --border: rgba(255,255,255,0.10);
+    --series: #3987e5;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    /* ordinal ramp for the 5 funnel stages (steps 300..550) */
+    --stage-1: #6da7ec; --stage-2: #3987e5; --stage-3: #2a78d6;
+    --stage-4: #256abf; --stage-5: #1c5cab;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--page);
+    background-image: radial-gradient(ellipse 80% 50% at 50% -10%,
+                      rgba(57,135,229,0.08), transparent);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    padding: 24px clamp(16px, 4vw, 48px) 64px;
+  }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 16px;
+           margin-bottom: 24px; }
+  .brand { font-size: 18px; font-weight: 700; letter-spacing: 0.18em; }
+  .brand span { color: var(--series); }
+  .root-path { color: var(--ink-3); font-size: 12px; }
+  .badge { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px;
+           font-size: 11px; color: var(--ink-2); letter-spacing: 0.08em; }
+  .live { margin-left: auto; display: flex; align-items: center; gap: 8px;
+          font-size: 12px; color: var(--ink-2); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
+  .dot.pulse { animation: pulse 1s ease-out; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(12,163,12,0.7); }
+                     100% { box-shadow: 0 0 0 10px rgba(12,163,12,0); } }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+           gap: 12px; margin-bottom: 24px; }
+  .tile { background: var(--surface); border: 1px solid var(--border);
+          border-radius: 10px; padding: 14px 16px; }
+  .tile .v { font-size: 28px; font-weight: 700; }
+  .tile .l { color: var(--ink-3); font-size: 11px; letter-spacing: 0.12em;
+             text-transform: uppercase; margin-top: 2px; }
+
+  h2 { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+       color: var(--ink-2); margin: 0 0 12px; }
+  section { background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+
+  .funnel { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px; }
+  .stage { background: var(--surface-2); border-radius: 8px; padding: 12px 14px;
+           border: 1px solid var(--border); position: relative; overflow: hidden; }
+  .stage.done { border-color: rgba(12,163,12,0.35); }
+  .stage .n { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stage .n small { color: var(--ink-3); font-size: 13px; font-weight: 400; }
+  .stage .name { color: var(--ink-2); font-size: 11px; text-transform: uppercase;
+                 letter-spacing: 0.1em; margin: 2px 0 8px; }
+  .bar { height: 6px; border-radius: 4px; background: var(--grid); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 4px;
+           background: var(--stage-c, var(--series));
+           transition: width 0.8s cubic-bezier(.2,.8,.2,1); }
+  .stage .pct { position: absolute; top: 12px; right: 14px; color: var(--ink-3);
+                font-size: 11px; font-variant-numeric: tabular-nums; }
+  .stage.done .pct { color: var(--good); }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+
+  .hbar-row { display: grid; grid-template-columns: 130px 1fr 72px; gap: 10px;
+              align-items: center; padding: 3px 0; }
+  .hbar-row .name { color: var(--ink-2); font-size: 12px; white-space: nowrap;
+                    overflow: hidden; text-overflow: ellipsis; text-align: right; }
+  .hbar-track { height: 14px; display: flex; align-items: center; }
+  .hbar { height: 8px; border-radius: 0 4px 4px 0; background: var(--series);
+          min-width: 2px; transition: width 0.8s cubic-bezier(.2,.8,.2,1); }
+  .hbar-row .val { color: var(--ink-3); font-size: 12px;
+                   font-variant-numeric: tabular-nums; }
+
+  .hist { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px;
+          align-items: end; height: 120px; padding-top: 8px; }
+  .hist .hbin { background: var(--series); border-radius: 4px 4px 0 0; min-height: 2px;
+                transition: height 0.8s cubic-bezier(.2,.8,.2,1); }
+  .hist-x { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px;
+            color: var(--ink-3); font-size: 10px; text-align: center; margin-top: 4px;
+            font-variant-numeric: tabular-nums; }
+  .empty { color: var(--ink-3); font-size: 12px; padding: 24px 0; text-align: center; }
+  .attn { margin-top: 12px; border-top: 1px solid var(--grid); padding-top: 10px; }
+  .attn .row { display: flex; gap: 10px; font-size: 12px; color: var(--ink-2);
+               padding: 2px 0; font-variant-numeric: tabular-nums; }
+  .chip { border-radius: 999px; padding: 0 8px; font-size: 11px; font-weight: 600; }
+  .chip.crit { background: rgba(208,59,59,0.15); color: #e66767; }
+  .chip.warn { background: rgba(250,178,25,0.12); color: var(--warning); }
+
+  input[type=search] { background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--ink); padding: 6px 12px; font-size: 13px;
+    width: 240px; outline: none; }
+  input[type=search]:focus { border-color: var(--series); }
+  .tablewrap { max-height: 420px; overflow: auto; margin-top: 12px;
+               border: 1px solid var(--grid); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  thead th { position: sticky; top: 0; background: var(--surface-2); color: var(--ink-3);
+             text-align: left; font-size: 11px; text-transform: uppercase;
+             letter-spacing: 0.08em; padding: 8px 10px; z-index: 1; }
+  tbody td { padding: 6px 10px; border-top: 1px solid var(--grid);
+             color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  tbody tr:hover { background: rgba(57,135,229,0.06); }
+  .sdots { display: inline-flex; gap: 4px; }
+  .sdot { width: 9px; height: 9px; border-radius: 50%; background: var(--grid); }
+  .sdot.on { background: var(--good); }
+  .score-ok { color: var(--good); }
+  .score-bad { color: #e66767; }
+
+  #tooltip { position: fixed; pointer-events: none; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+    font-size: 12px; color: var(--ink); display: none; z-index: 10;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+  #tooltip .t2 { color: var(--ink-3); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">SIGNAL<span>ML</span> — MISSION CONTROL</div>
+  <div class="root-path" id="root"></div>
+  <div class="badge" id="profile">profile: —</div>
+  <div class="live"><div class="dot" id="dot"></div><span id="updated">connecting…</span></div>
+</header>
+
+<div class="tiles">
+  <div class="tile"><div class="v" id="t-songs">0</div><div class="l">songs</div></div>
+  <div class="tile"><div class="v" id="t-hours">0</div><div class="l">hours</div></div>
+  <div class="tile"><div class="v" id="t-singers">0</div><div class="l">singers</div></div>
+  <div class="tile"><div class="v" id="t-lyrics">0%</div><div class="l">lyrics coverage</div></div>
+</div>
+
+<section>
+  <h2>Pipeline</h2>
+  <div class="funnel" id="funnel"></div>
+</section>
+
+<div class="cols">
+  <section>
+    <h2>Singer census — hours</h2>
+    <div id="singers"></div>
+  </section>
+  <section>
+    <h2>Alignment confidence</h2>
+    <div id="histwrap">
+      <div class="hist" id="hist"></div>
+      <div class="hist-x" id="histx"></div>
+    </div>
+    <div class="attn" id="attn"></div>
+  </section>
+</div>
+
+<section>
+  <h2>Songs</h2>
+  <input type="search" id="filter" placeholder="filter by singer / song / id…">
+  <div class="tablewrap"><table>
+    <thead><tr><th>id</th><th>singer</th><th>song</th><th>dur</th><th>bpm</th>
+        <th>key</th><th>stages</th><th>align</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+</section>
+
+<div id="tooltip"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const STAGE_ORDER = ["scanned", "separated", "cleaned", "aligned", "featurized"];
+const ATTN_THRESHOLD = 0.7;
+let prev = "";
+
+function fmtDur(sec) {
+  if (sec == null) return "—";
+  const total = Math.round(sec), m = Math.floor(total / 60), s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function tween(el, target, fmt) {
+  const from = parseFloat(el.dataset.v || "0"), to = target;
+  el.dataset.v = to;
+  const t0 = performance.now();
+  (function step(t) {
+    const k = Math.min(1, (t - t0) / 600), v = from + (to - from) * (1 - (1-k)**3);
+    el.textContent = fmt(k === 1 ? to : v);
+    if (k < 1) requestAnimationFrame(step);
+  })(t0);
+}
+
+const tip = $("tooltip");
+function showTip(e, html) {
+  tip.innerHTML = html; tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 14, innerWidth - 220) + "px";
+  tip.style.top = (e.clientY + 14) + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+
+function render(d) {
+  $("root").textContent = d.data_root;
+  $("profile").textContent = "profile: " + (d.profiles.join(", ") || "—");
+  tween($("t-songs"), d.totals.songs, v => Math.round(v));
+  tween($("t-hours"), d.totals.hours, v => v.toFixed(2));
+  tween($("t-singers"), d.totals.singers, v => Math.round(v));
+  tween($("t-lyrics"), d.totals.lyrics_pct, v => v.toFixed(0) + "%");
+
+  $("funnel").innerHTML = d.stages.map((s, i) => {
+    const pct = s.total ? Math.round(100 * s.done / s.total) : 0;
+    return `<div class="stage ${pct === 100 ? "done" : ""}"
+                 style="--stage-c: var(--stage-${i + 1})">
+      <div class="pct">${pct === 100 ? "✓ 100%" : pct + "%"}</div>
+      <div class="n">${s.done}<small> / ${s.total}</small></div>
+      <div class="name">${esc(s.name)}</div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+    </div>`;
+  }).join("");
+
+  const maxH = Math.max(...d.singers.map(s => s.hours), 0.01);
+  $("singers").innerHTML = d.singers.map(s => `
+    <div class="hbar-row" data-tip="${esc(s.name)}|${s.songs} song(s) · ${s.hours} h">
+      <div class="name">${esc(s.name)}</div>
+      <div class="hbar-track"><div class="hbar"
+           style="width:${Math.max(1, 100 * s.hours / maxH)}%"></div></div>
+      <div class="val">${s.hours.toFixed(2)} h</div>
+    </div>`).join("");
+
+  const scores = d.align_scores;
+  if (!scores.length) {
+    $("histwrap").style.display = "none";
+    $("attn").innerHTML = `<div class="empty">no alignments yet — waiting on
+      <b>signalml align</b></div>`;
+  } else {
+    $("histwrap").style.display = "";
+    const bins = Array(10).fill(0);
+    scores.forEach(v => bins[Math.min(9, Math.floor(v * 10))]++);
+    const maxB = Math.max(...bins, 1);
+    $("hist").innerHTML = bins.map((b, i) =>
+      `<div class="hbin" style="height:${Math.max(2, 100 * b / maxB)}%"
+            data-tip="${(i/10).toFixed(1)}–${((i+1)/10).toFixed(1)}|${b} song(s)"></div>`
+    ).join("");
+    $("histx").innerHTML = bins.map((_, i) => i % 3 === 0 || i === 9
+      ? `<div>${(i / 10).toFixed(1)}</div>` : "<div></div>").join("");
+    const low = d.songs.filter(s => s.align_score != null &&
+                               s.align_score < ATTN_THRESHOLD)
+                       .sort((a, b) => a.align_score - b.align_score).slice(0, 6);
+    $("attn").innerHTML = low.length
+      ? `<div class="row" style="color:var(--ink-3)">below ${ATTN_THRESHOLD} —
+           excluded by the dataset quality gate:</div>` +
+        low.map(s => `<div class="row"><span class="chip crit">${s.align_score.toFixed(2)}</span>
+             <span>${esc(s.id)} · ${esc(s.singer)} · ${esc(s.song)}</span></div>`).join("")
+      : `<div class="row"><span class="chip" style="background:rgba(12,163,12,.12);
+           color:var(--good)">✓</span><span>all alignments ≥ ${ATTN_THRESHOLD}</span></div>`;
+  }
+
+  renderRows(d.songs);
+}
+
+let allSongs = [];
+function renderRows(songs) {
+  allSongs = songs;
+  const q = $("filter").value.trim().toLowerCase();
+  const shown = q ? songs.filter(s =>
+    [s.id, s.singer, s.song].join(" ").toLowerCase().includes(q)) : songs;
+  $("rows").innerHTML = shown.map(s => {
+    const dots = STAGE_ORDER.slice(1).map(f =>
+      `<span class="sdot ${s.stages[f] ? "on" : ""}" title="${f}:
+       ${s.stages[f] ? "done" : "pending"}"></span>`).join("");
+    const score = s.align_score == null ? "—"
+      : `<span class="${s.align_score >= ATTN_THRESHOLD ? "score-ok" : "score-bad"}">
+           ${s.align_score.toFixed(2)}</span>`;
+    return `<tr><td>${esc(s.id)}</td><td>${esc(s.singer)}</td>
+      <td title="${esc(s.song)}">${esc((s.song || "").slice(0, 42))}</td>
+      <td>${fmtDur(s.duration_sec)}</td><td>${s.bpm ?? "—"}</td>
+      <td>${esc(s.key ?? "—")}</td><td><span class="sdots">${dots}</span></td>
+      <td>${score}</td></tr>`;
+  }).join("");
+}
+$("filter").addEventListener("input", () => renderRows(allSongs));
+
+document.addEventListener("mousemove", e => {
+  const el = e.target.closest("[data-tip]");
+  if (!el) { hideTip(); return; }
+  const [t1, t2] = el.dataset.tip.split("|");
+  showTip(e, `<b>${esc(t1)}</b><div class="t2">${esc(t2)}</div>`);
+});
+
+async function poll() {
+  try {
+    const res = await fetch("/api/status");
+    const d = await res.json();
+    const sig = JSON.stringify([d.stages, d.totals, d.align_scores.length]);
+    if (sig !== prev) {
+      prev = sig;
+      render(d);
+      $("dot").classList.remove("pulse");
+      void $("dot").offsetWidth;  // restart the animation
+      $("dot").classList.add("pulse");
+    }
+    $("updated").textContent = "updated " + d.generated.replace("T", " ");
+  } catch {
+    $("updated").textContent = "server unreachable — retrying…";
+  }
+  setTimeout(poll, 4000);
+}
+poll();
+</script>
+</body>
+</html>

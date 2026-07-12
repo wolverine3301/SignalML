@@ -102,6 +102,25 @@ class TestScan:
         assert b.meta.has_lyrics is False
         assert b.file.path == "raw/gaelic/songB.wav"  # recursive + posix-relative
 
+    def test_scan_song_folder_convention(self, tmp_path, make_wav):
+        """One song per folder with lyrics.txt + META.txt siblings (corpus layout)."""
+        root = tmp_path / "dr"
+        song_dir = root / "RAW" / "singer" / "song-IZ0"
+        make_wav(song_dir / "artist, singer - song (Lyrics)-IZ0.wav")
+        (song_dir / "lyrics.txt").write_text("we could fix it", encoding="utf-8")
+        (song_dir / "META.txt").write_text(
+            "SONG:\nSINGER:singer\nARTIST:artist\nGENRE:edm\nTYPE:\nQUALITY:\n",
+            encoding="utf-8")
+
+        _, new = scan_directory(root, subpath="RAW", language="en", gender="F",
+                                singer="fallback-tag", source_quality="separated")
+        rec = new[0]
+        assert rec.meta.has_lyrics is True
+        assert rec.meta.lyrics_path.endswith("lyrics.txt")
+        assert rec.meta.singer == "singer"  # META.txt beats the CLI tag
+        assert rec.meta.song.startswith("artist")  # empty SONG: falls back to stem
+        assert rec.meta.source_quality == "separated"
+
     def test_rescan_is_idempotent(self, tmp_path, make_wav):
         root = tmp_path / "dr"
         make_wav(root / "raw" / "song.wav")
