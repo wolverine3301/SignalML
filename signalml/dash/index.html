@@ -123,6 +123,16 @@
   .score-ok { color: var(--good); }
   .score-bad { color: #e66767; }
 
+  .idle-tag { color: var(--ink-3); font-size: 10px; letter-spacing: 0.06em;
+              text-transform: none; margin-left: 10px; }
+  .train-grid { display: grid; grid-template-columns: 1fr 220px; gap: 18px; }
+  @media (max-width: 900px) { .train-grid { grid-template-columns: 1fr; } }
+  .chart-slot { border: 1px dashed var(--grid); border-radius: 8px; min-height: 96px;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    color: var(--ink-3); font-size: 11.5px; padding: 12px; margin-bottom: 12px; }
+  #trainviz { --nv-ink: #c3c2b7; --nv-muted: #898781; }
+  #trainviz .nv-edge { stroke-opacity: 0.045; }
+
   #tooltip { position: fixed; pointer-events: none; background: var(--surface-2);
     border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
     font-size: 12px; color: var(--ink); display: none; z-index: 10;
@@ -148,6 +158,24 @@
 <section>
   <h2>Pipeline</h2>
   <div class="funnel" id="funnel"></div>
+</section>
+
+<section>
+  <h2>Training — Component C <span class="idle-tag">idle · panel activates with P7 runs</span></h2>
+  <div class="train-grid">
+    <div>
+      <div class="tiles" style="margin-bottom:12px">
+        <div class="tile"><div class="v" id="tr-steps">—</div><div class="l">steps / sec</div></div>
+        <div class="tile"><div class="v" id="tr-loss">—</div><div class="l">loss</div></div>
+        <div class="tile"><div class="v" id="tr-epoch">—</div><div class="l">epoch</div></div>
+        <div class="tile"><div class="v" id="tr-gpu">—</div><div class="l">gpu util</div></div>
+      </div>
+      <div class="chart-slot">loss / LR / grad-norm curves render here from the
+        trainer's TensorBoard event files (P7)</div>
+      <div class="chart-slot">checkpoint audio samples + per-singer quality (P7)</div>
+    </div>
+    <div id="trainviz"></div>
+  </div>
 </section>
 
 <div class="cols">
@@ -177,8 +205,34 @@
 
 <div id="tooltip"></div>
 
+<script src="/netviz.js"></script>
 <script>
 "use strict";
+
+// vertical architecture schematic beside the training stats (full demo: /netviz)
+const trainViz = NetViz.render(document.getElementById("trainviz"), {
+  blocks: [
+    { id: "score", label: "score", sub: "lyrics + notes", cols: [2, 3] },
+    { id: "enc", label: "encoder", cols: [5, 7, 5] },
+    { id: "var", label: "variance", sub: "dur · F0", cols: [4, 5, 4] },
+    { id: "voice", label: "voice", sub: "spk 256d", cols: [2, 2], lane: 1 },
+    { id: "acoustic", label: "acoustic", sub: "U-Net + skips",
+      cols: [7, 5, 3, 5, 7], skip: true },
+    { id: "mel", label: "mel", sub: "128 × T", cols: [6] },
+    { id: "voc", label: "vocoder", sub: "NSF-HiFiGAN", cols: [5, 7, 5] },
+    { id: "wav", label: "wav", cols: [2, 3] },
+  ],
+  links: [
+    { from: "score", to: "enc" }, { from: "enc", to: "var" },
+    { from: "var", to: "acoustic" }, { from: "voice", to: "acoustic" },
+    { from: "acoustic", to: "mel" }, { from: "mel", to: "voc" },
+    { from: "voc", to: "wav" },
+  ],
+}, {
+  orientation: "vertical", ambient: true,
+  geometry: { nodeR: 2.8, rowGap: 12, colGap: 18, blockGap: 34, laneGap: 20 },
+});
+// P7 bindings replace ambient: trainViz.setRate("var>acoustic", stepsPerSec) etc.
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
