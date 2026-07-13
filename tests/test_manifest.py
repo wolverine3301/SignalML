@@ -145,6 +145,29 @@ class TestScan:
         assert final.records[1].status.aligned is True
         assert final.records[1].quality.align_score == 0.9
 
+    def test_commit_same_song_merges_flags_and_quality(self, tmp_path, make_wav):
+        """Same song touched by two parallel stages (align + features on sng_0050,
+        2026-07-12): both flags and the score must survive, whoever commits last."""
+        root = tmp_path / "dr"
+        make_wav(root / "raw" / "a.wav")
+        manifest, _ = scan_directory(root)
+        manifest.save()
+
+        m1 = Manifest.for_data_root(root)  # "align" process
+        m2 = Manifest.for_data_root(root)  # "features" process, stale snapshot
+        r1 = m1.records[0]
+        r1.status.aligned = True
+        r1.quality.align_score = 0.95
+        m1.commit(r1)
+        r2 = m2.records[0]  # same song; m2 never saw the align update
+        r2.status.featurized = True
+        m2.commit(r2)
+
+        rec = Manifest.for_data_root(root).records[0]
+        assert rec.status.aligned is True  # OR-merged, not clobbered
+        assert rec.status.featurized is True
+        assert rec.quality.align_score == 0.95  # non-None preserved
+
     def test_rescan_is_idempotent(self, tmp_path, make_wav):
         root = tmp_path / "dr"
         make_wav(root / "raw" / "song.wav")

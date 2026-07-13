@@ -196,15 +196,25 @@ class Manifest:
     def commit(self, record: ManifestRecord) -> None:
         """Persist ONE record: lock, re-read the file, merge just this record, write.
 
-        This is the concurrency-safe save for stage loops: commits from stages running
-        in parallel merge per *record*, so one stage's commit can no longer wipe
-        another stage's updates to other songs (the bug the full-snapshot ``save``
-        had). If two stages commit the *same* song concurrently, the record is still
-        last-writer-wins — the loser's flag is simply redone on the next idempotent
-        re-run. The in-memory view refreshes to the merged state as a side effect.
+        This is the concurrency-safe save for stage loops. Cross-song: only this
+        record is touched, so a parallel stage can't wipe other songs (the bug the
+        full-snapshot ``save`` had). Same-song: status flags OR-merge (stages only
+        ever set their flag true; nothing legitimately unsets one via commit) and
+        quality fields prefer non-None, so two stages committing the same song keep
+        both stages' updates. Unsetting flags deliberately = edit the manifest, not
+        a stage commit. The in-memory view refreshes to the merged state.
         """
         with _manifest_lock(self.path):
             on_disk = Manifest(self.path)
+            existing = on_disk._records.get(record.id)
+            if existing is not None:
+                for flag in StatusFlags.model_fields:
+                    if getattr(existing.status, flag):
+                        setattr(record.status, flag, True)
+                for field in QualityInfo.model_fields:
+                    if getattr(record.quality, field) in (None, "") and \
+                            getattr(existing.quality, field) not in (None, ""):
+                        setattr(record.quality, field, getattr(existing.quality, field))
             on_disk._records[record.id] = record
             on_disk.save()
             self._records = on_disk._records
