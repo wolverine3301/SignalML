@@ -7,8 +7,10 @@ acoustic_model: english_mfa
 dictionary: english_mfa
 # how to invoke mfa; default goes through conda so the pipeline env stays torch-clean
 mfa_command: ["conda", "run", "-n", "aligner", "--no-capture-output", "mfa"]
-beam: 100
-retry_beam: 400
+# Singing needs wider beams than MFA's speech defaults: on the test-corpus test_corpus
+# corpus, 9 songs failed at 100/400 and all aligned cleanly at 200/1000 (2026-07-12).
+beam: 200
+retry_beam: 1000
 num_jobs: 4
 # reject songs whose alignment contains phones outside the declared phone set
 strict_phones: true
