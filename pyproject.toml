@@ -46,7 +46,7 @@ packages = ["signalml"]
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["archive"]
+extend-exclude = ["archive", "third_party"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
