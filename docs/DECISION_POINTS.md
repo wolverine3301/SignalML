@@ -27,14 +27,30 @@ exactly this, PyTorch, but another vendored dependency), or a hybrid (auto-trans
 + spot-check UI). Choice interacts with D2 (the trainer's expected dataset format
 already has conventions for this) and D3 (phone-set/slur representation).
 
-**Inputs needed:** D2's fork choice first; then a quality bake-off on 5–10 real
-separated vocals.
+**Inputs needed:** ~~D2's fork choice first~~ **D2 resolved (2026-07-12):** the trainer
+expects `note_seq`/`note_dur` columns in transcriptions.csv; ecosystem tools are
+openvpi **SOME** + MakeDiffSinger `variance-temp-solution`/`midi-recognition`, with
+SlurCutter for manual fixes. Remaining input: the quality bake-off on 5–10 real
+separated vocals (the test_corpus corpus is processed and ready for this).
 **Current lean:** ROSVOT/SOME from the openvpi ecosystem, since D2 already leans
-openvpi — but verify maintenance state at decision time.
+openvpi — but verify maintenance state at decision time. Note: the P7.5 overfit proof
+can start acoustic-only (ground-truth durations) before D1 is fully solved.
 **Delegable once decided:** the stage implementation (S5b "transcribe"), manifest
 wiring, QC sampling scripts.
 
-## D2. 🔴 Trainer integration boundary (P7.1 — constrains D1, D3, S6b)
+## D2. ✅ RESOLVED 2026-07-12 — Trainer integration boundary
+
+**Decision:** vendor **openvpi/DiffSinger v2.5.1** (submodule `third_party/DiffSinger`,
+commit `323a569`, Apache-2.0), posture **(a) adopt-their-world**, zero local patches,
+trainer in its own venv (their pins conflict: librosa<0.10, numpy<2, lightning~=2.3).
+Full spike notes + integration contract: `docs/notes/vendor_diffsinger.md`. Highlights:
+their binarizer computes training mels from wavs (D5 dissolves — their spectral
+defaults match our `prod` profile exactly); multi-speaker via `spk_id` table
+(`use_spk_id: true`) is the D7 hook; v2.5 multilingual dictionaries are the Gaelic
+mechanism; ⚠ phoneme naming is "ASCII preferred" — IPA smoke-test in the overfit run,
+ASCII transliteration table as fallback (D3).
+
+<details><summary>Original question (for the record)</summary>
 
 **What must be decided:** which exact DiffSinger fork/tag to vendor, and **where our
 pipeline ends and theirs begins.** Two coherent postures: (a) *adopt their world* —
@@ -52,6 +68,8 @@ D6 all shape themselves around it.
 the system of record and one converter into their format; revisit (b) only if their
 conventions start distorting upstream stages.
 **Delegable once decided:** the converter, config templating, run-dir bookkeeping.
+
+</details>
 
 ## D3. 🔴 Phone-set reconciliation: MFA IPA ↔ trainer dictionary
 
@@ -85,7 +103,21 @@ coding chore.
 P6 upgraded by a designed lyric-fitting pass; (b) later, reusing D1's transcriber.
 **Delegable once decided:** importer code, schema validation, test corpora.
 
+> **D3 update (2026-07-12, from the D2 spike):** trainer dictionary format is
+> tab-separated `syllable → phones` text, *generated* from `score/phoneset.py` as
+> leaned; their phoneme-naming rule ("ASCII preferred", `/ - +` etc. forbidden) means
+> IPA symbols need a smoke test in the overfit run — fallback is a deterministic
+> ASCII transliteration in phoneset.py, invisible upstream. Their v2.5 multilingual
+> system (language-prefixed phones, `merged_phoneme_groups`, `use_lang_id`) is the
+> layering mechanism for the universal-set ambition.
+
 ## D5. 🟠 The mel contract lock (silent-failure zone)
+
+> **Mostly dissolved by D2 (2026-07-12):** adopt-their-world means the vendored
+> binarizer computes training mels *from the wavs* — our features NPZs are analysis
+> artifacts, not trainer input. Their defaults equal our `prod` profile exactly
+> (44100/2048/512/128/fmax16k/mel_base e). Residual D5 = keep `configs/audio.yaml`
+> prod in lockstep with the vendored config templates (one assert in S6b).
 
 **What must be decided:** one authoritative spectral spec shared by the features
 stage, the acoustic model, and the vocoder — mel filterbank params, log base,
