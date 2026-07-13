@@ -24,12 +24,15 @@
 
 const NetViz = (() => {
   const NS = "http://www.w3.org/2000/svg";
-  const NODE_R = 3.5;
-  const COL_GAP = 26;
-  const ROW_GAP = 16;
-  const BLOCK_PAD = 16;
-  const BLOCK_GAP = 56;
-  const LABEL_H = 30;
+  // geometry defaults; override per-render via opts.geometry (e.g. denser lattices)
+  const GEO = {
+    nodeR: 3.5,   // node radius
+    colGap: 26,   // px between lattice columns
+    rowGap: 16,   // px between lattice rows
+    blockPad: 16, // lattice inset inside the frame
+    blockGap: 56, // px between blocks
+    labelH: 30,   // room reserved for the block label
+  };
 
   function el(name, attrs, parent) {
     const node = document.createElementNS(NS, name);
@@ -38,25 +41,26 @@ const NetViz = (() => {
     return node;
   }
 
-  function blockSize(block) {
+  function blockSize(block, geo) {
     const maxRows = Math.max(...block.cols);
     return {
-      w: BLOCK_PAD * 2 + (block.cols.length - 1) * COL_GAP,
-      h: BLOCK_PAD * 2 + (maxRows - 1) * ROW_GAP + LABEL_H,
+      w: geo.blockPad * 2 + (block.cols.length - 1) * geo.colGap,
+      h: geo.blockPad * 2 + (maxRows - 1) * geo.rowGap + geo.labelH,
     };
   }
 
   function render(container, spec, opts = {}) {
     const accent = opts.accent || "#3987e5";
+    const geo = { ...GEO, ...(opts.geometry || {}) };
     const blocks = new Map();
     let x = 0, maxH = 0;
     for (const b of spec.blocks) {
-      const size = blockSize(b);
+      const size = blockSize(b, geo);
       blocks.set(b.id, { ...b, x, ...size });
-      x += size.w + BLOCK_GAP;
+      x += size.w + geo.blockGap;
       maxH = Math.max(maxH, size.h);
     }
-    const width = x - BLOCK_GAP;
+    const width = x - geo.blockGap;
     const height = maxH + 8;
     for (const b of blocks.values()) b.y = (height - b.h) / 2; // vertical centering
 
@@ -83,9 +87,9 @@ const NetViz = (() => {
     // ---- blocks: frame, label, node lattice, intra-block edges, skip arcs ----
     const nodePos = (b, ci, ri) => {
       const rows = b.cols[ci];
-      const x0 = b.x + BLOCK_PAD + ci * COL_GAP;
-      const y0 = b.y + LABEL_H + BLOCK_PAD +
-        ((Math.max(...b.cols) - rows) * ROW_GAP) / 2 + ri * ROW_GAP;
+      const x0 = b.x + geo.blockPad + ci * geo.colGap;
+      const y0 = b.y + geo.labelH + geo.blockPad +
+        ((Math.max(...b.cols) - rows) * geo.rowGap) / 2 + ri * geo.rowGap;
       return [x0, y0];
     };
 
@@ -130,7 +134,7 @@ const NetViz = (() => {
       for (let ci = 0; ci < b.cols.length; ci++) {
         for (let ri = 0; ri < b.cols[ci]; ri++) {
           const [cx, cy] = nodePos(b, ci, ri);
-          const node = el("circle", { cx, cy, r: NODE_R, class: "nv-node",
+          const node = el("circle", { cx, cy, r: geo.nodeR, class: "nv-node",
                                       fill: b.accent || accent }, g);
           node.style.animationDelay = `${((ci * 7 + ri * 13) % 20) / 10}s`;
         }
@@ -142,8 +146,8 @@ const NetViz = (() => {
     for (const l of spec.links) {
       const a = blocks.get(l.from), b = blocks.get(l.to);
       if (!a || !b) throw new Error(`netviz link references unknown block: ${l.from}>${l.to}`);
-      const x1 = a.x + a.w, y1 = a.y + LABEL_H + (a.h - LABEL_H) / 2;
-      const x2 = b.x, y2 = b.y + LABEL_H + (b.h - LABEL_H) / 2;
+      const x1 = a.x + a.w, y1 = a.y + geo.labelH + (a.h - geo.labelH) / 2;
+      const x2 = b.x, y2 = b.y + geo.labelH + (b.h - geo.labelH) / 2;
       const mid = (x1 + x2) / 2;
       const path = el("path", {
         d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`,

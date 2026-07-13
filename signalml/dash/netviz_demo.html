@@ -27,6 +27,8 @@
     border-radius: 8px; padding: 6px 14px; font-size: 12px; cursor: pointer; }
   button:hover { border-color: var(--series); color: var(--ink); }
   a { color: var(--series); }
+  /* dense lattice: pull edge opacity down so the weave reads as texture, not soup */
+  .netviz .nv-edge { stroke-opacity: 0.045; }
 </style>
 </head>
 <body>
@@ -55,15 +57,15 @@
 // module renders any tool's topology; the P7 training panel feeds it live rates.
 const spec = {
   blocks: [
-    { id: "score", label: "score", sub: "lyrics + notes (IPA)", cols: [1, 2] },
-    { id: "enc", label: "encoder", sub: "phoneme + note embed", cols: [3, 4, 3] },
-    { id: "var", label: "variance", sub: "duration · pitch (F0)", cols: [3, 3] },
-    { id: "voice", label: "voice bank", sub: "spk embedding (256d)", cols: [2, 2] },
+    { id: "score", label: "score", sub: "lyrics + notes (IPA)", cols: [2, 3] },
+    { id: "enc", label: "encoder", sub: "phoneme + note embed", cols: [5, 7, 7, 5] },
+    { id: "var", label: "variance", sub: "duration · pitch (F0)", cols: [4, 5, 4] },
+    { id: "voice", label: "voice bank", sub: "spk embedding (256d)", cols: [3, 3] },
     { id: "acoustic", label: "acoustic — diffusion", sub: "U-Net denoiser + skips",
-      cols: [5, 4, 3, 2, 3, 4, 5], skip: true, accent: "#3987e5" },
-    { id: "mel", label: "mel", sub: "128 × T", cols: [4] },
-    { id: "voc", label: "vocoder", sub: "NSF-HiFiGAN (ours)", cols: [3, 4, 3] },
-    { id: "wav", label: "wav", sub: "44.1 kHz vocal", cols: [1, 2] },
+      cols: [8, 6, 4, 3, 4, 6, 8], skip: true, accent: "#3987e5" },
+    { id: "mel", label: "mel", sub: "128 × T", cols: [6] },
+    { id: "voc", label: "vocoder", sub: "NSF-HiFiGAN (ours)", cols: [5, 7, 7, 5] },
+    { id: "wav", label: "wav", sub: "44.1 kHz vocal", cols: [2, 3] },
   ],
   links: [
     { from: "score", to: "enc" },
@@ -76,7 +78,10 @@ const spec = {
   ],
 };
 
-const viz = NetViz.render(document.getElementById("viz"), spec, { ambient: false });
+const viz = NetViz.render(document.getElementById("viz"), spec, {
+  ambient: false,
+  geometry: { nodeR: 2.8, rowGap: 12, colGap: 20, blockGap: 48 },
+});
 const CHAIN = ["score>enc", "enc>var", "var>acoustic", "acoustic>mel", "mel>voc", "voc>wav"];
 const ALL_BLOCKS = spec.blocks.map(b => b.id);
 let mode = null, timer = null;
