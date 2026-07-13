@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SignalML — NetViz</title>
+<style>
+  :root { --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7;
+          --ink-3: #898781; --border: rgba(255,255,255,0.10); --series: #3987e5;
+          --nv-ink: #c3c2b7; --nv-muted: #898781; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--page);
+    background-image: radial-gradient(ellipse 80% 50% at 50% -10%,
+                      rgba(57,135,229,0.08), transparent);
+    color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 24px clamp(16px, 4vw, 48px); }
+  header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 20px; }
+  .brand { font-size: 18px; font-weight: 700; letter-spacing: 0.18em; }
+  .brand span { color: var(--series); }
+  .note { color: var(--ink-3); font-size: 12px; }
+  section { background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 22px; margin-bottom: 16px; }
+  h2 { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+       color: var(--ink-2); margin-bottom: 16px; }
+  .controls { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  button { background: var(--page); color: var(--ink-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 14px; font-size: 12px; cursor: pointer; }
+  button:hover { border-color: var(--series); color: var(--ink); }
+  a { color: var(--series); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">SIGNAL<span>ML</span> — NETVIZ</div>
+  <div class="note">schematic, not the real graph — topology truthful, node counts decorative
+    · <a href="/">back to mission control</a></div>
+</header>
+
+<section>
+  <h2>Component C — the singer (training-panel preview)</h2>
+  <div id="viz"></div>
+  <div class="controls">
+    <span class="note" style="align-self:center">simulate bindings →</span>
+    <button id="b-train">training: acoustic (steps/sec → pulse rate)</button>
+    <button id="b-gan">training: vocoder GAN (G/D alternation)</button>
+    <button id="b-sing">inference: sing (one phrase through the chain)</button>
+    <button id="b-stop">idle</button>
+  </div>
+</section>
+
+<script src="/netviz.js"></script>
+<script>
+"use strict";
+// The real architecture (ARCHITECTURE.md §6) as a declarative spec — the same
+// module renders any tool's topology; the P7 training panel feeds it live rates.
+const spec = {
+  blocks: [
+    { id: "score", label: "score", sub: "lyrics + notes (IPA)", cols: [1, 2] },
+    { id: "enc", label: "encoder", sub: "phoneme + note embed", cols: [3, 4, 3] },
+    { id: "var", label: "variance", sub: "duration · pitch (F0)", cols: [3, 3] },
+    { id: "voice", label: "voice bank", sub: "spk embedding (256d)", cols: [2, 2] },
+    { id: "acoustic", label: "acoustic — diffusion", sub: "U-Net denoiser + skips",
+      cols: [5, 4, 3, 2, 3, 4, 5], skip: true, accent: "#3987e5" },
+    { id: "mel", label: "mel", sub: "128 × T", cols: [4] },
+    { id: "voc", label: "vocoder", sub: "NSF-HiFiGAN (ours)", cols: [3, 4, 3] },
+    { id: "wav", label: "wav", sub: "44.1 kHz vocal", cols: [1, 2] },
+  ],
+  links: [
+    { from: "score", to: "enc" },
+    { from: "enc", to: "var" },
+    { from: "var", to: "acoustic" },
+    { from: "voice", to: "acoustic" },
+    { from: "acoustic", to: "mel" },
+    { from: "mel", to: "voc" },
+    { from: "voc", to: "wav" },
+  ],
+};
+
+const viz = NetViz.render(document.getElementById("viz"), spec, { ambient: false });
+const CHAIN = ["score>enc", "enc>var", "var>acoustic", "acoustic>mel", "mel>voc", "voc>wav"];
+const ALL_BLOCKS = spec.blocks.map(b => b.id);
+let mode = null, timer = null;
+
+function reset() {
+  clearInterval(timer);
+  timer = null;
+  for (const k of CHAIN.concat("voice>acoustic")) viz.setRate(k, 0);
+  for (const b of ALL_BLOCKS) viz.setActive(b, false);
+}
+
+document.getElementById("b-train").onclick = () => {
+  reset(); mode = "train";
+  viz.setActive("acoustic", true);
+  // stand-in for real steps/sec from the trainer's TensorBoard events
+  viz.setRate("var>acoustic", 2.2);
+  viz.setRate("voice>acoustic", 1.1);
+  viz.setRate("acoustic>mel", 2.2);
+};
+
+document.getElementById("b-gan").onclick = () => {
+  reset(); mode = "gan";
+  let g = true;
+  viz.setActive("voc", true);
+  timer = setInterval(() => {  // G step / D step alternation
+    viz.setRate("mel>voc", g ? 3 : 0.4);
+    viz.setRate("voc>wav", g ? 0.4 : 3);
+    g = !g;
+  }, 900);
+};
+
+document.getElementById("b-sing").onclick = () => {
+  reset(); mode = "sing";
+  let i = 0;
+  timer = setInterval(() => {
+    if (i > 0) viz.setActive(spec.blocks[Math.min(i, 7)].id, false);
+    if (i >= CHAIN.length) { reset(); return; }
+    viz.pulse(CHAIN[i], 3);
+    viz.setActive(spec.blocks[i + 1].id === "voice" ? "acoustic" : spec.blocks[i + 1].id, true);
+    if (CHAIN[i] === "var>acoustic") viz.pulse("voice>acoustic", 2);
+    i++;
+  }, 700);
+};
+
+document.getElementById("b-stop").onclick = reset;
+</script>
+</body>
+</html>

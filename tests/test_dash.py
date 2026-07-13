@@ -66,6 +66,10 @@ def test_server_routes(data_root):
             urllib.request.urlopen(f"{base}/api/status", timeout=5).read())
         assert payload["totals"]["songs"] == 1
         assert urllib.request.urlopen(f"{base}/", timeout=5).status == 200
+        demo = urllib.request.urlopen(f"{base}/netviz", timeout=5).read().decode("utf-8")
+        assert "NetViz.render" in demo
+        js = urllib.request.urlopen(f"{base}/netviz.js", timeout=5).read().decode("utf-8")
+        assert "const NetViz" in js
         with pytest.raises(urllib.error.HTTPError):
             urllib.request.urlopen(f"{base}/nope", timeout=5)
     finally:

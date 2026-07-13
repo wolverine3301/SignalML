@@ -15,7 +15,12 @@ from pathlib import Path
 
 from ..manifest import Manifest, StatusFlags
 
-_INDEX = Path(__file__).with_name("index.html")
+_ASSETS = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/index.html": ("index.html", "text/html; charset=utf-8"),
+    "/netviz": ("netviz_demo.html", "text/html; charset=utf-8"),
+    "/netviz.js": ("netviz.js", "text/javascript; charset=utf-8"),
+}
 
 STAGE_FLAGS = list(StatusFlags.model_fields)  # separated, cleaned, aligned, featurized
 
@@ -99,9 +104,10 @@ class _Handler(BaseHTTPRequestHandler):
     server: DashServer  # type: ignore[assignment]
 
     def do_GET(self) -> None:  # noqa: N802 (stdlib API name)
-        if self.path in ("/", "/index.html"):
-            body = _INDEX.read_bytes()
-            self._send(200, "text/html; charset=utf-8", body)
+        if self.path in _ASSETS:
+            filename, content_type = _ASSETS[self.path]
+            body = Path(__file__).with_name(filename).read_bytes()
+            self._send(200, content_type, body)
         elif self.path == "/api/status":
             payload = build_status(self.server.data_root)
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
