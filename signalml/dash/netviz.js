@@ -6,19 +6,25 @@
  * cosmetic-only mode is `ambient` for demos.
  *
  * Usage:
- *   const viz = NetViz.render(container, spec, {ambient: false});
+ *   const viz = NetViz.render(container, spec, opts);
  *   spec = {
- *     blocks: [{id, label, sub?, cols: [3,5,3], accent?, skip?: true}],
+ *     blocks: [{id, label, sub?, cols: [3,5,3], accent?, skip?: true, lane?: 1}],
  *     links:  [{from, to, label?}],
+ *   }
+ *   opts = {
+ *     orientation: "horizontal" (default) | "vertical",
+ *     geometry: {nodeR, rowGap, colGap, blockPad, blockGap, laneGap, labelH},
+ *     ambient: false, accent: "#3987e5",
  *   }
  *   viz.pulse("from>to")        one pulse along a link (block ids joined by ">")
  *   viz.setRate("from>to", hz)  sustained pulse rate (0 stops)
  *   viz.setActive(blockId, on)  glow a block (e.g. the model currently training)
  *   viz.destroy()
  *
- * Layout: blocks flow left-to-right, links are cubic curves between block edges.
- * A block with `skip: true` draws U-Net-style skip arcs between mirrored columns.
- * One rAF loop per instance; pauses when the document is hidden.
+ * Layout: main-flow blocks run along the orientation axis; a block with `lane: 1`
+ * sits BESIDE the next main-flow block (side-feeder, e.g. a speaker embedding
+ * injected into the acoustic model). `skip: true` draws U-Net skip arcs between
+ * mirrored layers. One rAF loop per instance; pauses when the document is hidden.
  */
 "use strict";
 
@@ -27,10 +33,11 @@ const NetViz = (() => {
   // geometry defaults; override per-render via opts.geometry (e.g. denser lattices)
   const GEO = {
     nodeR: 3.5,   // node radius
-    colGap: 26,   // px between lattice columns
-    rowGap: 16,   // px between lattice rows
+    colGap: 26,   // px between layers (along the flow axis)
+    rowGap: 16,   // px between nodes within a layer (across the flow axis)
     blockPad: 16, // lattice inset inside the frame
-    blockGap: 56, // px between blocks
+    blockGap: 56, // px between blocks along the flow
+    laneGap: 28,  // px between the main flow and a side lane
     labelH: 30,   // room reserved for the block label
   };
 
@@ -41,28 +48,52 @@ const NetViz = (() => {
     return node;
   }
 
-  function blockSize(block, geo) {
-    const maxRows = Math.max(...block.cols);
-    return {
-      w: geo.blockPad * 2 + (block.cols.length - 1) * geo.colGap,
-      h: geo.blockPad * 2 + (maxRows - 1) * geo.rowGap + geo.labelH,
-    };
+  function blockSize(block, geo, vert) {
+    const across = (Math.max(...block.cols) - 1) * geo.rowGap;   // within a layer
+    const along = (block.cols.length - 1) * geo.colGap;          // layer stacking
+    return vert
+      ? { w: geo.blockPad * 2 + across, h: geo.blockPad * 2 + along + geo.labelH }
+      : { w: geo.blockPad * 2 + along, h: geo.blockPad * 2 + across + geo.labelH };
   }
 
   function render(container, spec, opts = {}) {
     const accent = opts.accent || "#3987e5";
+    const vert = opts.orientation === "vertical";
     const geo = { ...GEO, ...(opts.geometry || {}) };
     const blocks = new Map();
-    let x = 0, maxH = 0;
-    for (const b of spec.blocks) {
-      const size = blockSize(b, geo);
-      blocks.set(b.id, { ...b, x, ...size });
-      x += size.w + geo.blockGap;
-      maxH = Math.max(maxH, size.h);
+    for (const b of spec.blocks) blocks.set(b.id, { ...b, ...blockSize(b, geo, vert) });
+
+    // ---- layout: main flow along the axis, lane blocks beside their anchor ----
+    const mains = spec.blocks.filter((b) => !b.lane).map((b) => blocks.get(b.id));
+    const lanes = spec.blocks.filter((b) => b.lane).map((b) => blocks.get(b.id));
+    let flow = 0, mainAcross = 0;
+    for (const b of mains) {
+      b.flow = flow;
+      flow += (vert ? b.h : b.w) + geo.blockGap;
+      mainAcross = Math.max(mainAcross, vert ? b.w : b.h);
     }
-    const width = x - geo.blockGap;
-    const height = maxH + 8;
-    for (const b of blocks.values()) b.y = (height - b.h) / 2; // vertical centering
+    const flowTotal = flow - geo.blockGap;
+    for (const b of mains) {  // center main blocks in the across axis
+      if (vert) { b.y = b.flow; b.x = (mainAcross - b.w) / 2; }
+      else { b.x = b.flow; b.y = (mainAcross - b.h) / 2; }
+    }
+    let laneAcross = 0;
+    for (const b of lanes) {  // a lane block sits beside the NEXT main block in order
+      const idx = spec.blocks.indexOf(spec.blocks.find((s) => s.id === b.id));
+      const anchor = spec.blocks.slice(idx + 1).map((s) => blocks.get(s.id))
+        .find((s) => !s.lane) || mains[mains.length - 1];
+      if (vert) {
+        b.x = mainAcross + geo.laneGap;
+        b.y = anchor.y + Math.max(0, (anchor.h - b.h) / 2);
+        laneAcross = Math.max(laneAcross, geo.laneGap + b.w);
+      } else {
+        b.y = mainAcross + geo.laneGap;
+        b.x = anchor.x + Math.max(0, (anchor.w - b.w) / 2);
+        laneAcross = Math.max(laneAcross, geo.laneGap + b.h);
+      }
+    }
+    const width = vert ? mainAcross + laneAcross : flowTotal;
+    const height = vert ? flowTotal : mainAcross + laneAcross;
 
     const svg = el("svg", {
       viewBox: `-4 -4 ${width + 8} ${height + 8}`,
@@ -84,13 +115,14 @@ const NetViz = (() => {
     const blockLayer = el("g", {}, svg);
     const pulseLayer = el("g", {}, svg);
 
-    // ---- blocks: frame, label, node lattice, intra-block edges, skip arcs ----
+    // node position: layer ci, node ri within the layer (centered across)
     const nodePos = (b, ci, ri) => {
-      const rows = b.cols[ci];
-      const x0 = b.x + geo.blockPad + ci * geo.colGap;
-      const y0 = b.y + geo.labelH + geo.blockPad +
-        ((Math.max(...b.cols) - rows) * geo.rowGap) / 2 + ri * geo.rowGap;
-      return [x0, y0];
+      const pad = (Math.max(...b.cols) - b.cols[ci]) * geo.rowGap / 2;
+      return vert
+        ? [b.x + geo.blockPad + pad + ri * geo.rowGap,
+           b.y + geo.labelH + geo.blockPad + ci * geo.colGap]
+        : [b.x + geo.blockPad + ci * geo.colGap,
+           b.y + geo.labelH + geo.blockPad + pad + ri * geo.rowGap];
     };
 
     for (const b of blocks.values()) {
@@ -105,7 +137,7 @@ const NetViz = (() => {
         el("text", { x: b.x + b.w / 2, y: b.y + b.h - 6, class: "nv-sub",
                      "text-anchor": "middle" }, g).textContent = b.sub;
       }
-      // intra-block edges (faint, bipartite between adjacent columns)
+      // intra-block edges (faint, bipartite between adjacent layers)
       for (let ci = 0; ci < b.cols.length - 1; ci++) {
         for (let ri = 0; ri < b.cols[ci]; ri++) {
           for (let rj = 0; rj < b.cols[ci + 1]; rj++) {
@@ -115,19 +147,19 @@ const NetViz = (() => {
           }
         }
       }
-      // U-Net skip arcs between mirrored columns
+      // U-Net skip arcs between mirrored layers (top edge horiz / left edge vert)
       if (b.skip) {
         const n = b.cols.length;
         for (let ci = 0; ci < Math.floor(n / 2); ci++) {
           const mirror = n - 1 - ci;
           if (mirror <= ci) continue;
-          const [x1, y1] = nodePos(b, ci, 0);
-          const [x2] = nodePos(b, mirror, 0);
+          const [ax, ay] = nodePos(b, ci, 0);
+          const [bx, by] = nodePos(b, mirror, 0);
           const lift = 14 + ci * 6;
-          el("path", {
-            d: `M ${x1} ${y1 - 6} C ${x1} ${y1 - lift}, ${x2} ${y1 - lift}, ${x2} ${y1 - 6}`,
-            class: "nv-skip", stroke: b.accent || accent,
-          }, g);
+          const d = vert
+            ? `M ${ax - 6} ${ay} C ${ax - lift} ${ay}, ${bx - lift} ${by}, ${bx - 6} ${by}`
+            : `M ${ax} ${ay - 6} C ${ax} ${ay - lift}, ${bx} ${by - lift}, ${bx} ${by - 6}`;
+          el("path", { d, class: "nv-skip", stroke: b.accent || accent }, g);
         }
       }
       // nodes, with a slow phase-offset shimmer
@@ -141,24 +173,37 @@ const NetViz = (() => {
       }
     }
 
-    // ---- links between blocks (cubic curves, right edge -> left edge) ----
+    // ---- links: along-flow = exit/entry faces; lane links = facing side edges ----
+    const midOf = (b) => [b.x + b.w / 2, b.y + geo.labelH + (b.h - geo.labelH) / 2];
     const links = new Map();
     for (const l of spec.links) {
       const a = blocks.get(l.from), b = blocks.get(l.to);
       if (!a || !b) throw new Error(`netviz link references unknown block: ${l.from}>${l.to}`);
-      const x1 = a.x + a.w, y1 = a.y + geo.labelH + (a.h - geo.labelH) / 2;
-      const x2 = b.x, y2 = b.y + geo.labelH + (b.h - geo.labelH) / 2;
-      const mid = (x1 + x2) / 2;
-      const path = el("path", {
-        d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`,
-        class: "nv-link",
-      }, linkLayer);
+      let d;
+      if (vert && a.y + a.h <= b.y + 1) {          // downward chain link
+        const x1 = a.x + a.w / 2, y1 = a.y + a.h;
+        const x2 = b.x + b.w / 2, y2 = b.y;
+        const mid = (y1 + y2) / 2;
+        d = `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`;
+      } else if (!vert && a.x + a.w <= b.x + 1) {  // rightward chain link
+        const [, y1] = midOf(a), [, y2] = midOf(b);
+        const x1 = a.x + a.w, x2 = b.x;
+        const mid = (x1 + x2) / 2;
+        d = `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
+      } else if (vert) {                            // side lane -> main (horizontal)
+        const [, y1] = midOf(a), [, y2] = midOf(b);
+        const [x1, x2] = a.x > b.x ? [a.x, b.x + b.w] : [a.x + a.w, b.x];
+        const mid = (x1 + x2) / 2;
+        d = `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
+      } else {                                      // side lane -> main (vertical)
+        const [x1] = midOf(a), [x2] = midOf(b);
+        const [y1, y2] = a.y > b.y ? [a.y, b.y + b.h] : [a.y + a.h, b.y];
+        const mid = (y1 + y2) / 2;
+        d = `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`;
+      }
+      const path = el("path", { d, class: "nv-link" }, linkLayer);
       const key = `${l.from}>${l.to}`;
       links.set(key, { path, len: path.getTotalLength(), rate: 0, acc: 0, pulses: [] });
-      if (l.label) {
-        el("text", { x: mid, y: Math.min(y1, y2) - 6, class: "nv-sub",
-                     "text-anchor": "middle" }, linkLayer).textContent = l.label;
-      }
     }
 
     // ---- pulse engine: one rAF loop, pooled circles, hidden-tab pause ----
