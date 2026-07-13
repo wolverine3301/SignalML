@@ -259,8 +259,7 @@ def align(
                 })
                 rec.status.aligned = True
                 rec.quality.align_score = score
-                manifest.upsert(rec)
-                manifest.save()
+                manifest.commit(rec)
                 summary.aligned.append(rec.id)
             except Exception as exc:  # one bad song must not kill the batch
                 summary.failed[rec.id] = str(exc)

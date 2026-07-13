@@ -14,6 +14,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -178,12 +180,65 @@ class Manifest:
         self._records[record.id] = record
 
     def save(self) -> None:
-        """Atomic write: temp file in the same directory, then os.replace."""
+        """Atomic write: temp file in the same directory, then os.replace.
+
+        Dumps this instance's full in-memory view — correct for single-writer flows
+        (scan, acquire). Stage loops that may run concurrently with other stages must
+        use :meth:`commit` instead, or a parallel stage's save will silently clobber
+        their updates with its stale snapshot.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".jsonl.tmp")
         lines = [rec.model_dump_json(exclude_none=False) for rec in self._records.values()]
         tmp.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         os.replace(tmp, self.path)
+
+    def commit(self, record: ManifestRecord) -> None:
+        """Persist ONE record: lock, re-read the file, merge just this record, write.
+
+        This is the concurrency-safe save for stage loops: commits from stages running
+        in parallel merge per *record*, so one stage's commit can no longer wipe
+        another stage's updates to other songs (the bug the full-snapshot ``save``
+        had). If two stages commit the *same* song concurrently, the record is still
+        last-writer-wins — the loser's flag is simply redone on the next idempotent
+        re-run. The in-memory view refreshes to the merged state as a side effect.
+        """
+        with _manifest_lock(self.path):
+            on_disk = Manifest(self.path)
+            on_disk._records[record.id] = record
+            on_disk.save()
+            self._records = on_disk._records
+
+
+@contextmanager
+def _manifest_lock(manifest_path: Path, timeout_sec: float = 15.0):
+    """Cross-process mutex via an O_EXCL lock file next to the manifest. A lock older
+    than ``timeout_sec`` is treated as abandoned (crashed writer) and stolen."""
+    lock = manifest_path.with_suffix(".jsonl.lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout_sec
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > timeout_sec:
+                    lock.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                continue  # holder released it between our checks
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"could not acquire manifest lock {lock}") from None
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        try:
+            lock.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _find_lyrics_sidecar(audio_path: Path) -> Path | None:
