@@ -176,8 +176,7 @@ def clean(
                 },
             )
             rec.status.cleaned = True
-            manifest.upsert(rec)
-            manifest.save()
+            manifest.commit(rec)
             summary.cleaned.append(rec.id)
         except Exception as exc:  # one bad song must not kill the batch
             summary.failed[rec.id] = str(exc)

@@ -258,8 +258,7 @@ def features(
 
             update_analysis(sdir, "features", info)
             rec.status.featurized = True
-            manifest.upsert(rec)
-            manifest.save()
+            manifest.commit(rec)
             summary.featurized.append(rec.id)
         except Exception as exc:  # one bad song must not kill the batch
             summary.failed[rec.id] = str(exc)

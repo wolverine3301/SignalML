@@ -168,8 +168,7 @@ def separate(
                 {**info, "date": _dt.date.today().isoformat()},
             )
             rec.status.separated = True
-            manifest.upsert(rec)
-            manifest.save()  # per-song save: long batches are resumable
+            manifest.commit(rec)  # per-song save: long batches are resumable
             summary.separated.append(rec.id)
         except Exception as exc:  # one bad song must not kill the batch
             summary.failed[rec.id] = str(exc)

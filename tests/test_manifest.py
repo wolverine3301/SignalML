@@ -121,6 +121,30 @@ class TestScan:
         assert rec.meta.song.startswith("Kygo")  # empty SONG: falls back to stem
         assert rec.meta.source_quality == "separated"
 
+    def test_commit_survives_concurrent_stage_snapshots(self, tmp_path, make_wav):
+        """Two stages holding independent manifest snapshots (parallel align +
+        features, the 2026-07-12 race) must not clobber each other's songs."""
+        root = tmp_path / "dr"
+        make_wav(root / "raw" / "a.wav")
+        make_wav(root / "raw" / "b.wav", hz=330)
+        manifest, _ = scan_directory(root)
+        manifest.save()
+
+        m1 = Manifest.for_data_root(root)  # "features" process
+        m2 = Manifest.for_data_root(root)  # "align" process, stale snapshot
+        r1 = m1.records[0]
+        r1.status.featurized = True
+        m1.commit(r1)
+        r2 = m2.records[1]  # m2 never saw r1's update
+        r2.status.aligned = True
+        r2.quality.align_score = 0.9
+        m2.commit(r2)
+
+        final = Manifest.for_data_root(root)
+        assert final.records[0].status.featurized is True  # not wiped by m2's commit
+        assert final.records[1].status.aligned is True
+        assert final.records[1].quality.align_score == 0.9
+
     def test_rescan_is_idempotent(self, tmp_path, make_wav):
         root = tmp_path / "dr"
         make_wav(root / "raw" / "song.wav")
