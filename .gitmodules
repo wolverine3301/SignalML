@@ -1,0 +1,4 @@
+[submodule "third_party/DiffSinger"]
+	path = third_party/DiffSinger
+	url = https://github.com/openvpi/DiffSinger.git
+	ignore = untracked

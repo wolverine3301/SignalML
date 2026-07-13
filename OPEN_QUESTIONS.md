@@ -34,6 +34,12 @@
 
 # Resolved
 
+## 2026-07-12
+
+| Q | Decision | Where it landed |
+|---|---|---|
+| D2 Trainer boundary (DECISION_POINTS.md) | **openvpi/DiffSinger v2.5.1 vendored (submodule, Apache-2.0), adopt-their-world, zero patches, own trainer venv** | `docs/notes/vendor_diffsinger.md`; DECISION_POINTS D2 ✅ (D5 mostly dissolved, D1/D3 sharpened); MIGRATION P7.1 done |
+
 ## 2026-07-07 (second batch)
 
 | Q | Decision | Where it landed |

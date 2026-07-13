@@ -222,8 +222,12 @@ old parser deleted.
 
 > Everything here per ARCHITECTURE.md §3–4; this is the greenfield stage.
 
-1. Vendor the **OpenVPI DiffSinger** fork into `third_party/` (submodule; pin a tag).
-   Write `docs/notes/vendor_diffsinger.md`: exact tag, license, local patches (aim: zero).
+1. ✅ DONE 2026-07-12 (D2 spike): **openvpi/DiffSinger v2.5.1** vendored as submodule
+   at `third_party/DiffSinger` (`323a569`, Apache-2.0), posture adopt-their-world,
+   zero patches, dedicated trainer venv (their pins conflict with the pipeline env).
+   Full integration contract in `docs/notes/vendor_diffsinger.md` — S6b emits their
+   `wavs/ + transcriptions.csv` per (singer, language); their binarizer owns training
+   mels (matches `prod` profile exactly).
 2. Implement S6b `signalml dataset build`: manifest query → trainer's binarized format;
    `dataset_card.md` with hours/singers/license roll-up. Refuse records with null gender
    or below alignment-confidence threshold.
