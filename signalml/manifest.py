@@ -56,6 +56,14 @@ class MetaInfo(BaseModel):
     # "studio" = real dry stems (gold for vocoder training); "separated" = Demucs output
     # with the mix's production baked in. Dataset recipes filter/weight on this.
     source_quality: Literal["studio", "separated"] | None = None
+    # how much production is baked into the VOICE itself (orthogonal to source_quality):
+    # dry = natural voice, produced = normal mix polish, heavy = audible autotune/FX.
+    # Human-tagged via META.txt PROCESSING:; recipes exclude/include per experiment.
+    processing: Literal["dry", "produced", "heavy"] | None = None
+    # wave-3 (DECISION_POINTS D10): speech corpora join with domain=spoken;
+    # everything sung so far defaults accordingly
+    domain: Literal["sung", "spoken"] = "sung"
+    genre: str | None = None  # from META.txt GENRE: (covers-experiment analysis, style tags)
 
 
 class StatusFlags(BaseModel):
@@ -268,6 +276,19 @@ def _normalize_singer(value: str | None) -> str | None:
     return cleaned or None
 
 
+_PROCESSING_VALUES = ("dry", "produced", "heavy")
+_DOMAIN_VALUES = ("sung", "spoken")
+
+
+def _valid_tag(value: str | None, allowed: tuple[str, ...]) -> str | None:
+    """Normalize a META.txt tag value; unknown values are dropped (None), not errors —
+    the retag report surfaces them for the human to fix."""
+    if value is None:
+        return None
+    cleaned = value.strip().lower()
+    return cleaned if cleaned in allowed else None
+
+
 def _read_meta_sidecar(audio_path: Path) -> dict[str, str]:
     """Parse a ``META.txt`` next to the audio (corpus convention): ``KEY:value`` lines
     (SONG/SINGER/ARTIST/GENRE/TYPE/QUALITY). Empty values are dropped."""
@@ -334,12 +355,71 @@ def scan_directory(
                 has_lyrics=lyrics is not None,
                 lyrics_path=lyrics.relative_to(data_root).as_posix() if lyrics else None,
                 source_quality=source_quality,
+                processing=_valid_tag(sidecar.get("PROCESSING"), _PROCESSING_VALUES),
+                domain=_valid_tag(sidecar.get("DOMAIN"), _DOMAIN_VALUES) or "sung",
+                genre=(sidecar.get("GENRE") or "").strip().lower() or None,
             ),
         )
         manifest.add(rec)
         new_records.append(rec)
 
     return manifest, new_records
+
+
+RETAG_SAFE_FIELDS = ("processing", "domain", "genre")
+
+
+def retag_from_sidecars(
+    data_root: str | Path,
+    *,
+    fields: tuple[str, ...] = RETAG_SAFE_FIELDS,
+) -> tuple[Manifest, list[tuple[str, str, str | None, str | None]], list[tuple[str, str]]]:
+    """Refresh chosen meta fields on EXISTING records from their META.txt sidecars.
+
+    Default fields are the additive tags only — deliberately NOT singer/song, which
+    were hand-repaired in the manifest and must not be clobbered by source-file typos
+    (fix META.txt first, then opt in via fields=). Returns (manifest, changes as
+    (id, field, old, new), warnings as (id, message)); caller saves.
+    """
+    data_root = Path(data_root)
+    manifest = Manifest.for_data_root(data_root)
+    changes: list[tuple[str, str, str | None, str | None]] = []
+    warnings: list[tuple[str, str]] = []
+
+    for rec in manifest.records:
+        sidecar = _read_meta_sidecar(data_root / rec.file.path)
+        if not sidecar:
+            continue
+        new_values: dict[str, str | None] = {}
+        if "processing" in fields and "PROCESSING" in sidecar:
+            value = _valid_tag(sidecar["PROCESSING"], _PROCESSING_VALUES)
+            if value is None:
+                warnings.append((rec.id, f"PROCESSING:{sidecar['PROCESSING']!r} not in "
+                                         f"{_PROCESSING_VALUES} — ignored"))
+            else:
+                new_values["processing"] = value
+        if "domain" in fields and "DOMAIN" in sidecar:
+            value = _valid_tag(sidecar["DOMAIN"], _DOMAIN_VALUES)
+            if value is None:
+                warnings.append((rec.id, f"DOMAIN:{sidecar['DOMAIN']!r} not in "
+                                         f"{_DOMAIN_VALUES} — ignored"))
+            else:
+                new_values["domain"] = value
+        if "genre" in fields and sidecar.get("GENRE"):
+            new_values["genre"] = sidecar["GENRE"].strip().lower()
+        if "singer" in fields and sidecar.get("SINGER"):
+            new_values["singer"] = _normalize_singer(sidecar["SINGER"])
+        if "song" in fields and sidecar.get("SONG"):
+            new_values["song"] = sidecar["SONG"]
+
+        for field, new in new_values.items():
+            old = getattr(rec.meta, field)
+            if old != new:
+                setattr(rec.meta, field, new)
+                changes.append((rec.id, field, old, new))
+        manifest.upsert(rec)
+
+    return manifest, changes, warnings
 
 
 def _hours(records: list[ManifestRecord]) -> float:
@@ -367,7 +447,9 @@ def manifest_report(manifest: Manifest) -> str:
 
     group("by language", lambda r: r.meta.language)
     group("by gender", lambda r: r.meta.gender)
+    group("by domain", lambda r: r.meta.domain)
     group("by source quality", lambda r: r.meta.source_quality)
+    group("by processing (voice naturalness)", lambda r: r.meta.processing)
     group("by singer (voice-bank census)", lambda r: r.meta.singer)
 
     n_singers = len({r.meta.singer for r in recs if r.meta.singer})
