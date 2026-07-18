@@ -120,6 +120,49 @@ class TestScan:
         assert rec.meta.singer == "singer"  # META.txt beats the CLI tag
         assert rec.meta.song.startswith("artist")  # empty SONG: falls back to stem
         assert rec.meta.source_quality == "separated"
+        assert rec.meta.genre == "edm"
+        assert rec.meta.domain == "sung"  # default until DOMAIN: is tagged
+        assert rec.meta.processing is None  # untagged, not guessed
+
+    def test_retag_updates_new_fields_only(self, tmp_path, make_wav):
+        """retag picks up PROCESSING/DOMAIN/GENRE from META.txt but must never
+        clobber the hand-repaired singer field by default."""
+        root = tmp_path / "dr"
+        song = root / "RAW" / "x" / "s1"
+        make_wav(song / "take.wav")
+        meta = song / "META.txt"
+        meta.write_text("SINGER:june larke\nGENRE:pop\n", encoding="utf-8")
+        manifest, _ = scan_directory(root, subpath="RAW")
+        rec = manifest.records[0]
+        rec.meta.singer = "singer"  # the hand-fix
+        manifest.upsert(rec)
+        manifest.save()
+
+        # user tags the song later (and fixes nothing else)
+        meta.write_text("SINGER:june larke\nGENRE:Pop\nPROCESSING:heavy\n"
+                        "DOMAIN:sung\nQUALITY:bogus\n", encoding="utf-8")
+        from signalml.manifest import retag_from_sidecars
+        m2, changes, warnings = retag_from_sidecars(root)
+        m2.save()
+
+        rec2 = Manifest.for_data_root(root).records[0]
+        assert rec2.meta.processing == "heavy"
+        assert rec2.meta.genre == "pop"
+        assert rec2.meta.singer == "singer"  # NOT clobbered back to the typo
+        assert ("processing" in {c[1] for c in changes})
+        assert warnings == []  # QUALITY: isn't a retag field; no noise about it
+
+    def test_retag_warns_on_bad_tag_value(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        song = root / "RAW" / "x" / "s1"
+        make_wav(song / "take.wav")
+        (song / "META.txt").write_text("PROCESSING:autotuned\n", encoding="utf-8")
+        manifest, _ = scan_directory(root, subpath="RAW")
+        manifest.save()
+        from signalml.manifest import retag_from_sidecars
+        _, changes, warnings = retag_from_sidecars(root)
+        assert changes == []
+        assert warnings and "autotuned" in warnings[0][1]
 
     def test_commit_survives_concurrent_stage_snapshots(self, tmp_path, make_wav):
         """Two stages holding independent manifest snapshots (parallel align +

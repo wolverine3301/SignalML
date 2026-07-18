@@ -132,6 +132,23 @@ def _cmd_features(args: argparse.Namespace) -> int:
     return 0 if not summary.failed else 1
 
 
+def _cmd_manifest_retag(args: argparse.Namespace) -> int:
+    from .manifest import RETAG_SAFE_FIELDS, resolve_data_root, retag_from_sidecars
+
+    fields = tuple(f.strip() for f in args.fields.split(",")) if args.fields \
+        else RETAG_SAFE_FIELDS
+    manifest, changes, warnings = retag_from_sidecars(
+        resolve_data_root(args.data_root), fields=fields)
+    manifest.save()
+    for rid, field, old, new in changes:
+        print(f"  {rid}: {field} {old!r} -> {new!r}")
+    for rid, msg in warnings:
+        print(f"  WARNING {rid}: {msg}", file=sys.stderr)
+    print(f"retag: {len(changes)} change(s) across fields {list(fields)}, "
+          f"{len(warnings)} warning(s)")
+    return 0
+
+
 def _cmd_manifest_report(args: argparse.Namespace) -> int:
     from .manifest import Manifest, manifest_report, resolve_data_root
 
@@ -276,6 +293,15 @@ def main(argv: list[str] | None = None) -> int:
     report_p.add_argument("--data-root", default=None,
                           help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
     report_p.set_defaults(func=_cmd_manifest_report)
+    retag_p = manifest_sub.add_parser(
+        "retag", help="refresh tag fields on existing records from META.txt sidecars"
+    )
+    retag_p.add_argument("--data-root", default=None,
+                         help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    retag_p.add_argument("--fields", default=None,
+                         help="comma list (default: processing,domain,genre — singer/"
+                              "song excluded so manifest fixes aren't clobbered)")
+    retag_p.set_defaults(func=_cmd_manifest_retag)
 
     # acquire
     acquire_p = subparsers.add_parser("acquire", help="[P1] download audio via yt-dlp")

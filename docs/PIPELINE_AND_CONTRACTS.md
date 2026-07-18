@@ -107,7 +107,9 @@ namespaced block). Example record:
   "file": {"path": "raw/sng_0042.mp3", "sha256": "...", "duration_sec": 213.4,
             "sample_rate": 44100, "channels": 2},
   "meta": {"singer": "artist-name", "gender": "F", "song": "title",
-            "language": "en", "license_note": "personal research use"},
+            "language": "en", "license_note": "personal research use",
+            "source_quality": "separated", "processing": "produced",
+            "domain": "sung", "genre": "edm"},
   "status": {"separated": true, "cleaned": true, "aligned": false, "featurized": false},
   "quality": {"separation_snr_est": null, "align_score": null, "notes": ""}
 }
@@ -117,6 +119,15 @@ Rules: `id` is assigned once and is the join key for everything under `songs/<id
 `gender` is required (dataset scope filter); `license_note`/`source` are required (the
 license-hygiene mechanism from ARCHITECTURE.md §8); stages **never** rescan directories —
 they query the manifest for `status.<prev_stage> == true && status.<this_stage> == false`.
+
+Tag semantics (dataset recipes filter on these; tags never delete data): `source_quality`
+= stem provenance (`studio` skips Demucs, `separated` = Demucs output); `processing`
+= production baked into the *voice* (`dry`/`produced`/`heavy` — orthogonal to
+provenance; human-tagged); `domain` = `sung` (default) / `spoken` (wave-3, D10);
+`genre` = free text. Human source of truth is the per-song `META.txt`
+(`SINGER:`/`SONG:`/`GENRE:`/`PROCESSING:`/`DOMAIN:`); `manifest scan` reads it for new
+records and `manifest retag` refreshes existing records (additive tags only by
+default, so hand-repaired manifest fields aren't clobbered by sidecar typos).
 
 ## 3. Stage contracts
 

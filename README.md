@@ -65,6 +65,9 @@ MFA-only WSL2 Ubuntu env sharing the data directory (ARCHITECTURE §2).
 python -m uv run signalml manifest scan --data-root D:\data --path raw\english --language en --gender F --source-quality separated
 # corpus census: singers (voice-bank census), hours, lyrics coverage, stage status:
 python -m uv run signalml manifest report --data-root D:\data
+# after editing META.txt tags (PROCESSING: dry|produced|heavy, DOMAIN: sung|spoken,
+# GENRE: ...), refresh existing records without rescanning:
+python -m uv run signalml manifest retag --data-root D:\data
 # download new audio:
 python -m uv run signalml acquire --urls urls.txt --data-root D:\data
 # separate stems (Demucs; resumable, idempotent):
