@@ -1,0 +1,25 @@
+# S6b dataset recipe (docs/PIPELINE_AND_CONTRACTS.md §S6b; docs/notes/vendor_diffsinger.md).
+# A dataset is a pure function of the manifest + this recipe — tags filter, they
+# never delete. Rebuild with `signalml dataset build --force` after edits.
+name: test_run_acoustic_v1
+trainer: acoustic          # variance blocked on DECISION_POINTS D1 (note labels)
+profile: prod              # clips must come from clean/ at this profile (Q11)
+
+filters:
+  domain: sung
+  language: en
+  gender: F
+  min_align_score: 0.8
+  exclude_processing: [heavy]   # tag via META.txt PROCESSING: + `manifest retag`
+  singers: []                   # empty = all
+  ids: []                       # optional explicit whitelist
+
+segmentation:
+  split_gap_sec: 0.4       # a silence gap this long ends a clip
+  min_clip_sec: 2.0
+  max_clip_sec: 15.0
+  pad_sec: 0.15
+  inner_sp_min_sec: 0.05   # smaller gaps merge into the neighboring phone
+  drop_noise_clips: true   # clips containing spn (alignment holes) are excluded
+
+test_clips_per_speaker: 2

@@ -25,7 +25,8 @@ STAGES: dict[str, tuple[str, str]] = {
     "render": ("P9", "render MIDI backing tracks (symbolic-first instrumental)"),
 }
 
-_IMPLEMENTED = {"manifest", "acquire", "separate", "clean", "features", "align", "score"}
+_IMPLEMENTED = {"manifest", "acquire", "separate", "clean", "features", "align", "score",
+                "dataset"}
 
 
 def _cmd_manifest_scan(args: argparse.Namespace) -> int:
@@ -240,6 +241,24 @@ def _cmd_score_phoneset(args: argparse.Namespace) -> int:
     return 0 if diff.clean else 1
 
 
+def _cmd_dataset_build(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .stages.dataset import build, load_dataset_recipe
+
+    summary = build(
+        resolve_data_root(args.data_root),
+        recipe=load_dataset_recipe(args.recipe),
+        force=args.force,
+    )
+    print(f"dataset build: {summary.clips} clip(s) / {summary.seconds / 3600:.2f} h "
+          f"from {len(summary.songs_used)} song(s) -> {summary.out_dir}")
+    if summary.dropped_clips:
+        print(f"  {summary.dropped_clips} clip(s) dropped (noise/too short)")
+    for rid, reason in sorted(summary.skipped.items()):
+        print(f"  SKIPPED {rid}: {reason}", file=sys.stderr)
+    return 0 if summary.clips else 1
+
+
 def _cmd_dash(args: argparse.Namespace) -> int:
     from .dash.server import serve
     from .manifest import resolve_data_root
@@ -387,6 +406,20 @@ def main(argv: list[str] | None = None) -> int:
     phoneset_p.add_argument("--dict", default=None,
                             help="installed MFA .dict file to verify against")
     phoneset_p.set_defaults(func=_cmd_score_phoneset)
+
+    # dataset
+    dataset_p = subparsers.add_parser("dataset", help="[P7] build training datasets")
+    dataset_sub = dataset_p.add_subparsers(dest="command", required=True)
+    build_p = dataset_sub.add_parser(
+        "build", help="manifest query -> vendored-trainer raw dataset + card"
+    )
+    build_p.add_argument("--data-root", default=None,
+                         help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    build_p.add_argument("--recipe", default=None,
+                         help="recipe yaml (default: configs/dataset.yaml)")
+    build_p.add_argument("--force", action="store_true",
+                         help="rebuild an existing dataset directory")
+    build_p.set_defaults(func=_cmd_dataset_build)
 
     # dash
     dash_p = subparsers.add_parser("dash", help="live pipeline monitoring dashboard")
