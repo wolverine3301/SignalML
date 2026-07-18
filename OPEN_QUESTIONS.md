@@ -30,6 +30,24 @@
   family lands, add the mapping table (`signalml/score/phoneset.py`) and bump the
   phone-set version — no architectural change needed.
 
+- **One voice that talks, acts, and sings** (Logan's original 2020 vision, restated
+  2026-07-13): the same persisted sampled voice renders plain speech, expressive
+  voice-acting, and singing. The 2020 intuition — master the expressive extreme
+  (singing) and the middle ground (expressive speech) follows — matches how the
+  field played out: singing-trained prosody enriches speech expressiveness.
+
+  **Verdict: feasible on this architecture as wave-3** (after the singing MVP proves
+  the voice bank). Mechanism: a **shared speaker-identity space** across domains —
+  either joint training with a domain flag, or (preferred) a shared external speaker
+  encoder conditioning all models — plus the "emotional notes" prosody track: the
+  score format generalized from `{span, pitch}` to `{span, emotion, intensity,
+  emphasis}`, entering the architecture exactly where note conditioning enters now.
+  Voice acting is the midpoint of the singing↔speech continuum, not a third system.
+  Already-made decisions that keep this door open: IPA phone set (domain-neutral;
+  MFA is speech-native), manifest/stage machinery (speech corpora ingest unchanged),
+  ECAPA already in the voice-bank loop. Full requirements analysis and the decision
+  forks: **DECISION_POINTS.md D10**.
+
 ---
 
 # Resolved

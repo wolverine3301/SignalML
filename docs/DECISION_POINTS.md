@@ -169,6 +169,70 @@ splits. Policy decisions ride on real corpus statistics (first manifest scan + P
 alignment scores) — set the policy when those numbers exist; executing it is
 delegable (S6b already reserves the enforcement hooks).
 
+## D10. 🟢 Wave-3: one voice that talks, acts, and sings (added 2026-07-13)
+
+**The vision** (Logan's 2020 origin idea, endorsed in OPEN_QUESTIONS *Future
+direction*): the same persisted sampled voice renders plain speech, expressive
+voice-acting, and singing. Voice acting = the midpoint of the singing↔speech
+continuum (expressive speech driven by an "emotional notes" prosody track), not a
+third system. **Gate: do not start until the P7/P8 singing MVP proves the voice bank**
+(a sampled voice sings consistently across two songs).
+
+**What must be decided (the forks):**
+
+1. **Identity mechanism** — how one voice spans domains:
+   (a) *joint training*: one acoustic model on singing + speech corpora, shared
+   learned `spk_id` table, domain flag. Simple; but every domain must train together,
+   and adding a domain means retraining everything.
+   (b) *shared external speaker encoder* (ECAPA/WavLM-class) conditioning all models;
+   the voice bank samples in **encoder space**, and any model conditioned on that
+   space renders the voice. **Current lean: (b)** — models train per-domain and
+   asynchronously, unseen corpora still enrich the sampling space, and `voice
+   reproject` generalizes to cross-domain projection natively. Known risk: encoder
+   conditioning historically gives slightly weaker identity match than learned
+   tables — mitigation is a hybrid (encoder-initialized table rows fine-tuned per
+   model). ⚠ Evaluation must use a *different* verifier model than the conditioning
+   encoder, or the system grades itself.
+2. **Emotion/prosody representation** for the "emotional notes" track: categorical
+   (≈6–8 classes + an intensity scalar — matches available labeled data; lean, start
+   here) vs continuous (arousal/valence plane — richer, nearly unlabelable by hand).
+   Lands as `signalml-score/0.2`: optional prosody events `{span, emotion,
+   intensity, emphasis}` alongside (not replacing) note events.
+3. **Speech corpora + licenses** (Logan's commercial-clean posture applies): decide
+   at start time; candidates to evaluate then — LibriTTS-R-class audiobook corpora
+   (clean, thousands of speakers, no emotion labels), emotion-labeled sets (ESD
+   etc. — many are research-only; check), and SER pseudo-labeling of audiobook
+   speech (the MFA/SOME auto-label pattern applied to emotion). License-check the
+   speaker encoder checkpoint too (SpeechBrain ECAPA is Apache; WavLM is not).
+
+**What it needs (requirements found 2026-07-13):**
+
+- **Paired anchors** — speakers with BOTH speech and singing data are what teach
+  "same timbre, different domain": NUS-48E is exactly paired read/sung (license:
+  research — check before shipping anything); cheaper and cleaner: **our own cover
+  artists' spoken content** (interviews/vlogs — same voices, same YouTube sourcing
+  pipeline). ~10+ paired speakers at minutes each calibrates the mapping.
+- **Pipeline deltas (small, by design):** `meta.domain: sung|spoken` manifest field;
+  the import-as-stems path (speech skips Demucs — same gap the studio stems already
+  need); an S5-emotion pseudo-label stage (SER model → `emotion.json` spans, human
+  spot-check); S6b domain-tagged dataset recipes with per-domain sampling weights
+  (so abundant speech doesn't swamp scarce singing in joint runs).
+- **Model work:** a speech-prosody variance model (emotion-conditioned F0/duration —
+  the monotone-vs-expressive difference lives here); domain conditioning in the
+  acoustic model; the vocoder is shared (NSF-HiFiGAN handles speech as the easy
+  case — add speech to its training data for robustness).
+- **Evaluation:** cross-domain identity check = independent-verifier cosine between
+  the same voice speaking vs singing (the D8 harness gains one metric); expressive
+  range vs a monotone baseline (F0 variance stats + listening protocol).
+- **Compute:** same class as everything else — speech acoustic runs are days on the
+  5090; no new hardware implied.
+
+**Top risk:** cross-domain identity drift (the voice sounds like a different person
+speaking vs singing). The paired anchors + hybrid conditioning are the mitigation,
+and the drift metric above is the early-warning gauge.
+**Delegable once decided:** corpus onboarding, the SER pseudo-label stage, dataset
+recipes, score-schema extension — all follow the established stage pattern.
+
 ---
 
 ## Explicitly delegable now (no architect needed)
