@@ -262,8 +262,18 @@ thin shell — free now, load-bearing later. Lyric retexting is D4's
 lyric-fitting algorithm applied to a fixed melody — the Studio fronts D4, never
 forks it.
 
+**Editor screen (added same day, STUDIO.md §6):** a fourth screen — general
+non-AI audio editing (trim/splice/fades, multitrack mixdown, LUFS normalize,
+vocal-chain presets, cleanup) so small jobs skip the external-editor
+round-trip. Non-destructive EDL-JSON edits, server-side CPU DSP over existing
+deps, profile-aware export. The suite-specific wins: **take comping** across
+seeds, open-from-render-history, send-back into `sing --mix`. Explicitly out
+of scope forever: VST hosting, MIDI editing, recording. Phase E — model-
+independent, interleaves any time after phase A.
+
 **Delegable once decided:** the whole implementation — server, frontend, tray
-state, render cache/queue — against STUDIO.md as the contract.
+state, render cache/queue, editor EDL + DSP ops — against STUDIO.md as the
+contract.
 
 ---
 

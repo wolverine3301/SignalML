@@ -144,7 +144,65 @@ provenance notes, ref playback, rename/archive. Small on purpose; exists so the
 other two screens don't accrete management clutter. When D10 lands, per-voice
 domain coverage (sings/speaks/acts) surfaces here.
 
-## 6. Phasing
+## 6. Screen 4 — Editor (general audio editing; added 2026-07-19)
+
+Not an AI loop — a plain audio editor screen, so small jobs never require a
+round-trip to an external editor. **Scope test for every tool:** "does this
+save a round-trip during a voice/render session?" A real external editor stays
+the path for anything heavier; this screen is convenience + integration, never
+parity (Audacity is a bottomless project — we are not building it).
+
+**Design rules:**
+
+- **Non-destructive:** edits are an **edit-decision list** (JSON beside the
+  source file), rendered to a new WAV on export. Unlimited undo falls out for
+  free; an edited file always records what it came from (the provenance
+  convention extended to edits).
+- DSP runs **server-side, CPU-only**, through the same job queue — usable while
+  the GPU trains. Nearly all of it wraps existing dependencies (pyloudnorm,
+  librosa, ffmpeg, the S4 resampler). Browser layer is a known-good waveform
+  component (wavesurfer.js / peaks.js class), not hand-rolled.
+- Exports are **profile-aware** (rates from `configs/audio.yaml` — the
+  no-hardcoded-sample-rates rule applies here too).
+
+**Tier 1 — daily drivers (build first):** waveform view with zoom + spectrogram
+toggle (mel code exists); trim/split/cut with snap-to-zero-crossing; fades and
+default crossfades at splice points; 2+-track timeline with per-track
+gain/pan/mute/solo and stereo mixdown (generalizes `sing --mix`); gain +
+normalize (peak and LUFS); region markers with loop playback; profile-aware
+export via ffmpeg.
+
+**Tier 2 — make it listenable:** rendered vocals are bone dry, so the
+highest-value unit is a small **vocal chain** — EQ → compressor → de-esser →
+reverb — with presets named `dry`/`produced`/`heavy` (deliberately the
+production-style vocabulary the contracts already use). Individually:
+parametric EQ (few bands + HP/LP), one-knob compressor/limiter, reverb
+(algorithmic or convolution with bundled public-domain IRs) + simple delay,
+per-track gain envelope, strip-silence/trim-edges.
+
+**Tier 3 — cleanup/repair (as needs appear):** spectral-gate noise reduction
+from a noise-print selection; de-hum (50/60 Hz + harmonics) and DC offset;
+click/pop repair; time-stretch/pitch-shift (librosa/rubberband) — ⚠ boundary:
+per the augmentation rule, edited audio never flows back into the corpus or a
+dataset; this screen serves outputs and backing tracks only.
+
+**Suite-specific features (the actual reason it lives here):**
+
+- **Open from render history** — one click from any Performance render into
+  the editor, provenance chain intact.
+- **Take comping** — render the same score 3–5× with different seeds, splice
+  the best phrase from each take on a comp track. The splice machinery pointed
+  at sibling renders; uniquely valuable for AI vocals.
+- **Send-back** — an edited backing track routes into `sing --mix`; an edited
+  demo phrase can replace a voice's `ref/` audio.
+- **F0 overlay** on the spectrogram (pyin already in stack) — see where a take
+  went pitchy; decide re-seed vs comp at a glance.
+
+**Out of scope, permanently:** VST/plugin hosting, MIDI editing, recording
+input, mastering. Export to the real editor for those — that path staying open
+is what keeps this screen small.
+
+## 7. Phasing
 
 - **A (right after P8):** S8 API layer, Voice Lab with temperature + seed +
   tray + save, demo score set defined. No PCA sliders yet — random sampling
@@ -154,6 +212,9 @@ domain coverage (sings/speaks/acts) surfaces here.
   when D4's lyric-fitting pass exists.
 - **D:** rides D10 — speech/acting domains, emotional-notes track editing
   (`signalml-score/0.2` prosody events).
+- **E:** Editor screen — tier 1 + take comping first; tiers 2–3 as needs
+  appear. Model-independent and CPU-only, so E can interleave any time after A
+  (comping and open-from-history only become meaningful once renders exist).
 
 Nothing here blocks or changes P7. The only pre-commitment is §1's API-first
 shape for P8.
