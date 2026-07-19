@@ -233,6 +233,38 @@ and the drift metric above is the early-warning gauge.
 **Delegable once decided:** corpus onboarding, the SER pseudo-label stage, dataset
 recipes, score-schema extension — all follow the established stage pattern.
 
+## D11. 🟢 Studio: the voice-generation front-end (added 2026-07-19)
+
+**The tool** (full design: `docs/STUDIO.md`): `signalml studio` — a local
+FastAPI + browser app served from the rig, wrapping the S8 API. Two screens plus
+a bank manager: **Voice Lab** (sample the timbre space with derived controls —
+temperature / PCA axes / blend, never raw dims — audition candidates on a fixed
+public-domain demo score set, compare via an evolutionary tray with
+reroll/tweak/breed, save through the full `voice new` guard path) and
+**Performance** (voice gallery with `ref/` playback + reproject staleness,
+score picker / MIDI import / lyric retexting, per-render transpose/tempo/mix/
+seed, render history). Hard rule: zero synthesis logic in the UI — every action
+is a seeded, CLI-reproducible call into `signalml.voices`/`signalml.synth`.
+**Gate: starts after P8.**
+
+**What must be decided (the forks):**
+
+1. **Frontend build** — Gradio prototype (fastest to first screen; fights the
+   candidate-tray UX) vs custom single-page frontend (~2–3 extra days; no wall).
+   **Current lean: custom SPA from the start**, optionally after a day-scale
+   throwaway Gradio spike of the audition loop.
+2. **Demo score set** — 2–3 short public-domain/original phrases (legato,
+   syllabic, range-spanning); decide jointly with D8's frozen benchmark set so
+   one curated set serves both.
+
+**Upstream implication (the only one):** P8 builds S8 **API-first**, CLI as a
+thin shell — free now, load-bearing later. Lyric retexting is D4's
+lyric-fitting algorithm applied to a fixed melody — the Studio fronts D4, never
+forks it.
+
+**Delegable once decided:** the whole implementation — server, frontend, tray
+state, render cache/queue — against STUDIO.md as the contract.
+
 ---
 
 ## Explicitly delegable now (no architect needed)
