@@ -400,6 +400,7 @@ def import_stem_folders(
     language: str | None = None,
     gender: Literal["F", "M"] | None = None,
     stem_filename: str = "vocals.wav",
+    source_quality: Literal["studio", "separated"] = "separated",
 ) -> tuple[Manifest, list[ManifestRecord], dict[str, str]]:
     """Onboard pre-separated one-song-per-folder stems (vocals.wav [+ accompaniment])
     without running Demucs: the vocal stem is copied into ``songs/<id>/stems/`` and
@@ -461,8 +462,10 @@ def import_stem_folders(
                 singer=_normalize_singer(sidecar.get("SINGER")),
                 has_lyrics=lyrics is not None,
                 lyrics_path=lyrics.relative_to(data_root).as_posix() if lyrics else None,
-                source_quality="separated",
-                processing=_processing_from_sidecar(sidecar),
+                source_quality=source_quality,
+                # studio stems are natural voices unless tagged otherwise
+                processing=_processing_from_sidecar(sidecar)
+                or ("dry" if source_quality == "studio" else None),
                 domain=_valid_tag(sidecar.get("DOMAIN"), _DOMAIN_VALUES) or "sung",
                 genre=(sidecar.get("GENRE") or "").strip().lower() or None,
             ),
@@ -474,7 +477,8 @@ def import_stem_folders(
         stems_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(vocal, stems_dir / "vocals.wav")
         update_analysis(sdir, "separate", {
-            "model": "imported-legacy-stems",
+            "model": "imported-studio-stems" if source_quality == "studio"
+            else "imported-legacy-stems",
             "imported_from": vocal.relative_to(data_root).as_posix(),
             "date": date.today().isoformat(),
         })
