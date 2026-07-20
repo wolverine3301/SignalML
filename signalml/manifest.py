@@ -14,8 +14,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import shutil
 import time
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -279,6 +282,11 @@ def _normalize_singer(value: str | None) -> str | None:
 _PROCESSING_VALUES = ("dry", "produced", "heavy")
 _DOMAIN_VALUES = ("sung", "spoken")
 
+# Logan's letter grades (META.txt QUALITY:): A = clean/natural recording, lower =
+# progressively heavier production (autotune etc.). Mapped onto the processing tag.
+_QUALITY_LETTERS = {"a": "dry", "b": "produced", "c": "heavy", "d": "heavy",
+                    "e": "heavy", "f": "heavy"}
+
 
 def _valid_tag(value: str | None, allowed: tuple[str, ...]) -> str | None:
     """Normalize a META.txt tag value; unknown values are dropped (None), not errors —
@@ -287,6 +295,15 @@ def _valid_tag(value: str | None, allowed: tuple[str, ...]) -> str | None:
         return None
     cleaned = value.strip().lower()
     return cleaned if cleaned in allowed else None
+
+
+def _processing_from_sidecar(sidecar: dict[str, str]) -> str | None:
+    """PROCESSING: dry|produced|heavy wins; QUALITY: letter grade maps as fallback."""
+    explicit = _valid_tag(sidecar.get("PROCESSING"), _PROCESSING_VALUES)
+    if explicit:
+        return explicit
+    letter = (sidecar.get("QUALITY") or "").strip().lower()
+    return _QUALITY_LETTERS.get(letter)
 
 
 def _read_meta_sidecar(audio_path: Path) -> dict[str, str]:
@@ -355,7 +372,7 @@ def scan_directory(
                 has_lyrics=lyrics is not None,
                 lyrics_path=lyrics.relative_to(data_root).as_posix() if lyrics else None,
                 source_quality=source_quality,
-                processing=_valid_tag(sidecar.get("PROCESSING"), _PROCESSING_VALUES),
+                processing=_processing_from_sidecar(sidecar),
                 domain=_valid_tag(sidecar.get("DOMAIN"), _DOMAIN_VALUES) or "sung",
                 genre=(sidecar.get("GENRE") or "").strip().lower() or None,
             ),
@@ -364,6 +381,110 @@ def scan_directory(
         new_records.append(rec)
 
     return manifest, new_records
+
+
+_YT_ID_RE = re.compile(r"[-_]([A-Za-z0-9_-]{11})$")
+
+
+def _yt_id(name: str) -> str | None:
+    """Trailing 11-char YouTube id in a folder/file name — the cross-corpus dedupe
+    key (the same performance can exist as a full mix and as legacy stems)."""
+    m = _YT_ID_RE.search(name)
+    return m.group(1) if m else None
+
+
+def import_stem_folders(
+    data_root: str | Path,
+    *,
+    subpath: str,
+    language: str | None = None,
+    gender: Literal["F", "M"] | None = None,
+    stem_filename: str = "vocals.wav",
+) -> tuple[Manifest, list[ManifestRecord], dict[str, str]]:
+    """Onboard pre-separated one-song-per-folder stems (vocals.wav [+ accompaniment])
+    without running Demucs: the vocal stem is copied into ``songs/<id>/stems/`` and
+    the record starts life ``separated=true`` (provenance recorded in analysis.json).
+
+    Dedupe: a folder whose YouTube id matches an existing record is skipped — the
+    existing (htdemucs-separated) version beats legacy Spleeter stems. Returns
+    (manifest, new_records, skipped {folder: reason}); caller saves.
+    """
+    from .stages.common import song_dir, update_analysis  # local: avoid import cycle
+
+    data_root = Path(data_root)
+    manifest = Manifest.for_data_root(data_root)
+    root = data_root / subpath
+    if not root.exists():
+        raise FileNotFoundError(f"Import path does not exist: {root}")
+
+    known_ids: dict[str, str] = {}
+    for rec in manifest.records:
+        p = Path(rec.file.path)
+        yid = _yt_id(p.parent.name) or _yt_id(p.stem)
+        if yid:
+            known_ids[yid] = rec.id
+
+    new_records: list[ManifestRecord] = []
+    skipped: dict[str, str] = {}
+    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+        vocal = folder / stem_filename
+        if not vocal.exists():
+            skipped[folder.name] = f"no {stem_filename}"
+            continue
+        yid = _yt_id(folder.name)
+        if yid and yid in known_ids:
+            skipped[folder.name] = (f"duplicate of {known_ids[yid]} "
+                                    f"(existing separation preferred)")
+            continue
+        digest = sha256_file(vocal)
+        if manifest.by_sha256(digest):
+            skipped[folder.name] = "checksum already in manifest"
+            continue
+
+        duration, sr, channels = probe_audio(vocal)
+        lyrics = _find_lyrics_sidecar(vocal)
+        sidecar = _read_meta_sidecar(vocal)
+        rec = ManifestRecord(
+            id=manifest.next_id(),
+            source=SourceInfo(kind="local"),
+            file=FileInfo(
+                path=vocal.relative_to(data_root).as_posix(),
+                sha256=digest,
+                duration_sec=duration,
+                sample_rate=sr,
+                channels=channels,
+            ),
+            meta=MetaInfo(
+                song=sidecar.get("SONG") or folder.name,
+                language=language,
+                gender=gender,
+                singer=_normalize_singer(sidecar.get("SINGER")),
+                has_lyrics=lyrics is not None,
+                lyrics_path=lyrics.relative_to(data_root).as_posix() if lyrics else None,
+                source_quality="separated",
+                processing=_processing_from_sidecar(sidecar),
+                domain=_valid_tag(sidecar.get("DOMAIN"), _DOMAIN_VALUES) or "sung",
+                genre=(sidecar.get("GENRE") or "").strip().lower() or None,
+            ),
+        )
+        rec.status.separated = True
+
+        sdir = song_dir(data_root, rec.id)
+        stems_dir = sdir / "stems"
+        stems_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(vocal, stems_dir / "vocals.wav")
+        update_analysis(sdir, "separate", {
+            "model": "imported-legacy-stems",
+            "imported_from": vocal.relative_to(data_root).as_posix(),
+            "date": date.today().isoformat(),
+        })
+
+        if yid:
+            known_ids[yid] = rec.id
+        manifest.add(rec)
+        new_records.append(rec)
+
+    return manifest, new_records, skipped
 
 
 RETAG_SAFE_FIELDS = ("processing", "domain", "genre")
@@ -391,11 +512,13 @@ def retag_from_sidecars(
         if not sidecar:
             continue
         new_values: dict[str, str | None] = {}
-        if "processing" in fields and "PROCESSING" in sidecar:
-            value = _valid_tag(sidecar["PROCESSING"], _PROCESSING_VALUES)
+        if "processing" in fields and ("PROCESSING" in sidecar or "QUALITY" in sidecar):
+            value = _processing_from_sidecar(sidecar)
             if value is None:
-                warnings.append((rec.id, f"PROCESSING:{sidecar['PROCESSING']!r} not in "
-                                         f"{_PROCESSING_VALUES} — ignored"))
+                raw = sidecar.get("PROCESSING") or sidecar.get("QUALITY")
+                warnings.append((rec.id, f"PROCESSING/QUALITY {raw!r} not in "
+                                         f"{_PROCESSING_VALUES} or letter grades "
+                                         f"{sorted(_QUALITY_LETTERS)} — ignored"))
             else:
                 new_values["processing"] = value
         if "domain" in fields and "DOMAIN" in sidecar:

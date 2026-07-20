@@ -1,0 +1,12 @@
+# Machine config: Logan's work PC (Ryzen 3900X / RTX 2080S). Absolute conda path
+# because detached/unattended processes inherit a pre-Miniforge PATH. Beams per the
+# singing defaults (configs/align.yaml). Used by scripts/onboard_full.ps1.
+language: en
+phone_set: mfa_ipa/en_v1
+acoustic_model: english_mfa
+dictionary: english_mfa
+mfa_command: ["C:\\Users\\Owner\\miniforge3\\Scripts\\conda.exe", "run", "-n", "aligner", "--no-capture-output", "mfa"]
+beam: 200
+retry_beam: 1000
+num_jobs: 12
+strict_phones: true
