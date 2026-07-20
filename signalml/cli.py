@@ -141,6 +141,7 @@ def _cmd_manifest_import_stems(args: argparse.Namespace) -> int:
         subpath=args.path,
         language=args.language,
         gender=args.gender,
+        source_quality=args.source_quality,
     )
     manifest.save()
     dupes = sum(1 for r in skipped.values() if "duplicate" in r)
@@ -346,6 +347,9 @@ def main(argv: list[str] | None = None) -> int:
                           help="subpath with one-song-per-folder stems, e.g. RAW/legacy_stems")
     import_p.add_argument("--language", default=None, help="tag new records")
     import_p.add_argument("--gender", default=None, choices=["F", "M"])
+    import_p.add_argument("--source-quality", default="separated",
+                          choices=["studio", "separated"],
+                          help="studio = real dry stems (also defaults processing=dry)")
     import_p.set_defaults(func=_cmd_manifest_import_stems)
     retag_p = manifest_sub.add_parser(
         "retag", help="refresh tag fields on existing records from META.txt sidecars"
