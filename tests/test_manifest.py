@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from signalml.manifest import (
@@ -140,7 +142,7 @@ class TestScan:
 
         # user tags the song later (and fixes nothing else)
         meta.write_text("SINGER:june larke\nGENRE:Pop\nPROCESSING:heavy\n"
-                        "DOMAIN:sung\nQUALITY:bogus\n", encoding="utf-8")
+                        "DOMAIN:sung\n", encoding="utf-8")
         from signalml.manifest import retag_from_sidecars
         m2, changes, warnings = retag_from_sidecars(root)
         m2.save()
@@ -150,7 +152,26 @@ class TestScan:
         assert rec2.meta.genre == "pop"
         assert rec2.meta.singer == "singer"  # NOT clobbered back to the typo
         assert ("processing" in {c[1] for c in changes})
-        assert warnings == []  # QUALITY: isn't a retag field; no noise about it
+        assert warnings == []
+
+    def test_retag_maps_quality_letters(self, tmp_path, make_wav):
+        """Logan's letter grades: QUALITY:A -> dry, B -> produced, C+ -> heavy."""
+        root = tmp_path / "dr"
+        for i, grade in enumerate(["A", "c"]):
+            d = root / "RAW" / "x" / f"s{i}"
+            make_wav(d / "take.wav", hz=220.0 + i * 30)
+            (d / "META.txt").write_text(f"QUALITY:{grade}\n", encoding="utf-8")
+        manifest, _ = scan_directory(root, subpath="RAW")
+        assert [r.meta.processing for r in manifest.records] == ["dry", "heavy"]
+        manifest.save()
+
+        # explicit PROCESSING beats the letter grade on retag
+        (root / "RAW" / "x" / "s0" / "META.txt").write_text(
+            "QUALITY:A\nPROCESSING:produced\n", encoding="utf-8")
+        from signalml.manifest import retag_from_sidecars
+        _, changes, warnings = retag_from_sidecars(root)
+        assert ("sng_0001", "processing", "dry", "produced") in changes
+        assert warnings == []
 
     def test_retag_warns_on_bad_tag_value(self, tmp_path, make_wav):
         root = tmp_path / "dr"
@@ -210,6 +231,50 @@ class TestScan:
         assert rec.status.aligned is True  # OR-merged, not clobbered
         assert rec.status.featurized is True
         assert rec.quality.align_score == 0.95  # non-None preserved
+
+    def test_import_stems_marks_separated_and_dedupes(self, tmp_path, make_wav):
+        """Pre-separated folders import without Demucs; yt-id duplicates of existing
+        records are skipped (the existing separation wins over legacy stems)."""
+        from signalml.manifest import import_stem_folders
+
+        root = tmp_path / "dr"
+        # existing record: a test_corpus-style full mix whose folder carries a yt id
+        make_wav(root / "raw" / "old" / "Song A (Cover)-AAAAAAAAAAA" / "mix.wav")
+        manifest, _ = scan_directory(root)
+        manifest.save()
+
+        dup = root / "RAW" / "Full" / "Song A (Cover)-AAAAAAAAAAA"
+        make_wav(dup / "vocals.wav", hz=300)
+        fresh = root / "RAW" / "Full" / "Song B (Cover)-BBBBBBBBBBB"
+        make_wav(fresh / "vocals.wav", hz=330)
+        make_wav(fresh / "accompaniment.wav", hz=110)  # must NOT become a record
+        (fresh / "lyrics.txt").write_text("la la", encoding="utf-8")
+        (fresh / "META.txt").write_text("SINGER:Alice\nQUALITY:B\nGENRE:pop\n",
+                                        encoding="utf-8")
+        (root / "RAW" / "Full" / "empty-folder").mkdir()
+
+        manifest, new, skipped = import_stem_folders(
+            root, subpath="RAW/legacy_stems", language="en", gender="F")
+        manifest.save()
+
+        assert len(new) == 1
+        rec = new[0]
+        assert rec.status.separated is True
+        assert rec.meta.singer == "alice"
+        assert rec.meta.processing == "produced"  # QUALITY:B letter grade
+        assert rec.meta.source_quality == "separated"
+        assert rec.meta.song == "Song B (Cover)-BBBBBBBBBBB"  # folder-name fallback
+        assert rec.meta.has_lyrics is True
+        assert (root / "songs" / rec.id / "stems" / "vocals.wav").exists()
+        analysis = json.loads(
+            (root / "songs" / rec.id / "analysis.json").read_text(encoding="utf-8"))
+        assert analysis["separate"]["model"] == "imported-legacy-stems"
+
+        assert any("duplicate" in r for r in skipped.values())
+        assert any("no vocals.wav" in r for r in skipped.values())
+        # idempotent: nothing new on re-run
+        _, new2, _ = import_stem_folders(root, subpath="RAW/legacy_stems")
+        assert new2 == []
 
     def test_rescan_is_idempotent(self, tmp_path, make_wav):
         root = tmp_path / "dr"

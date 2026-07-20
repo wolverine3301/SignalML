@@ -133,6 +133,30 @@ def _cmd_features(args: argparse.Namespace) -> int:
     return 0 if not summary.failed else 1
 
 
+def _cmd_manifest_import_stems(args: argparse.Namespace) -> int:
+    from .manifest import import_stem_folders, resolve_data_root
+
+    manifest, new_records, skipped = import_stem_folders(
+        resolve_data_root(args.data_root),
+        subpath=args.path,
+        language=args.language,
+        gender=args.gender,
+    )
+    manifest.save()
+    dupes = sum(1 for r in skipped.values() if "duplicate" in r)
+    print(f"import-stems: {len(new_records)} imported, {len(skipped)} skipped "
+          f"({dupes} duplicates of existing records)")
+    for folder, reason in sorted(skipped.items()):
+        if "duplicate" not in reason:  # duplicates are expected; keep the noise down
+            print(f"  SKIPPED {folder}: {reason}", file=sys.stderr)
+    missing_singer = [r.id for r in new_records if not r.meta.singer]
+    if missing_singer:
+        print(f"WARNING: {len(missing_singer)} imported record(s) without SINGER in "
+              f"META.txt: {', '.join(missing_singer[:10])}"
+              f"{' ...' if len(missing_singer) > 10 else ''}")
+    return 0
+
+
 def _cmd_manifest_retag(args: argparse.Namespace) -> int:
     from .manifest import RETAG_SAFE_FIELDS, resolve_data_root, retag_from_sidecars
 
@@ -312,6 +336,17 @@ def main(argv: list[str] | None = None) -> int:
     report_p.add_argument("--data-root", default=None,
                           help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
     report_p.set_defaults(func=_cmd_manifest_report)
+    import_p = manifest_sub.add_parser(
+        "import-stems",
+        help="onboard pre-separated song folders (vocals.wav) without Demucs",
+    )
+    import_p.add_argument("--data-root", default=None,
+                          help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    import_p.add_argument("--path", required=True,
+                          help="subpath with one-song-per-folder stems, e.g. RAW/legacy_stems")
+    import_p.add_argument("--language", default=None, help="tag new records")
+    import_p.add_argument("--gender", default=None, choices=["F", "M"])
+    import_p.set_defaults(func=_cmd_manifest_import_stems)
     retag_p = manifest_sub.add_parser(
         "retag", help="refresh tag fields on existing records from META.txt sidecars"
     )

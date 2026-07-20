@@ -1,7 +1,7 @@
 # S6b dataset recipe (docs/PIPELINE_AND_CONTRACTS.md §S6b; docs/notes/vendor_diffsinger.md).
 # A dataset is a pure function of the manifest + this recipe — tags filter, they
 # never delete. Rebuild with `signalml dataset build --force` after edits.
-name: test_run_acoustic_v1
+name: full_acoustic_v1
 trainer: acoustic          # variance blocked on DECISION_POINTS D1 (note labels)
 profile: prod              # clips must come from clean/ at this profile (Q11)
 
