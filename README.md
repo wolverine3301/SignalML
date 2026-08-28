@@ -66,6 +66,10 @@ python -m uv run signalml manifest scan --data-root D:\data --path raw\english -
 # onboard MedleyDB vocal stems (gender/singer come from its per-stem instrument
 # taxonomy, not from a flag; --dry-run first — see docs/notes/medleydb.md):
 python -m uv run signalml manifest import-medleydb --data-root D:\data --overrides configs\medleydb_overrides.yaml --dry-run
+# onboard VocalSet (CC BY 4.0; gender comes from the filename's singer id):
+python -m uv run signalml manifest import-vocalset --data-root D:\data --dry-run
+# tag pre-existing records with the corpus they came from (recipes scope on it):
+python -m uv run signalml manifest set-corpus own --data-root D:\data
 # corpus census: singers (voice-bank census), hours, lyrics coverage, stage status:
 python -m uv run signalml manifest report --data-root D:\data
 # after editing META.txt tags (PROCESSING: dry|produced|heavy, DOMAIN: sung|spoken,

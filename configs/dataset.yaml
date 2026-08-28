@@ -11,6 +11,8 @@ filters:
   gender: F
   min_align_score: 0.8
   exclude_processing: [heavy]   # tag via META.txt PROCESSING: + `manifest retag`
+  corpora: []                   # empty = every corpus; e.g. [vocalset, gtsinger]
+  exclude_corpora: []           # e.g. [medleydb] to keep a corpus out of this run
   singers: []                   # empty = all
   ids: []                       # optional explicit whitelist
 

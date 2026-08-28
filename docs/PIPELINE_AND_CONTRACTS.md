@@ -109,7 +109,7 @@ namespaced block). Example record:
   "meta": {"singer": "artist-name", "gender": "F", "song": "title",
             "language": "en", "license_note": "personal research use",
             "source_quality": "separated", "processing": "produced",
-            "domain": "sung", "genre": "edm"},
+            "domain": "sung", "genre": "edm", "corpus": "own"},
   "status": {"separated": true, "cleaned": true, "aligned": false, "featurized": false},
   "quality": {"separation_snr_est": null, "align_score": null, "notes": ""}
 }
@@ -124,8 +124,12 @@ Tag semantics (dataset recipes filter on these; tags never delete data): `source
 = stem provenance (`studio` skips Demucs, `separated` = Demucs output); `processing`
 = production baked into the *voice* (`dry`/`produced`/`heavy` — orthogonal to
 provenance; human-tagged); `domain` = `sung` (default) / `spoken` (wave-3, D10);
-`genre` = free text. Human source of truth is the per-song `META.txt`
-(`SINGER:`/`SONG:`/`GENRE:`/`PROCESSING:`/`DOMAIN:`); `manifest scan` reads it for new
+`genre` = free text; `corpus` = which corpus the record came from (`own`, `medleydb`,
+`vocalset`, ...) — recipes scope a training run to one corpus, to a combination
+(`filters.corpora`), or to everything-but (`filters.exclude_corpora`, e.g. dropping
+non-commercially-licensed sources from a run that has to ship). Ingest adapters set it;
+`manifest set-corpus` backfills records that predate the tag. Human source of truth is
+the per-song `META.txt` (`SINGER:`/`SONG:`/`GENRE:`/`PROCESSING:`/`DOMAIN:`/`CORPUS:`); `manifest scan` reads it for new
 records and `manifest retag` refreshes existing records (additive tags only by
 default, so hand-repaired manifest fields aren't clobbered by sidecar typos).
 

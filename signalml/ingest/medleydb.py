@@ -50,6 +50,7 @@ from ..manifest import (
 )
 from ..stages.common import song_dir, update_analysis
 
+CORPUS = "medleydb"  # meta.corpus tag: dataset recipes scope runs by corpus
 METADATA_SUFFIX = "_METADATA.yaml"
 LICENSE_NOTE = "MedleyDB — CC BY-NC-SA 4.0 (non-commercial)"
 
@@ -449,6 +450,7 @@ def import_medleydb(
                 processing=plan.processing,
                 domain=stem.domain,
                 genre=stem.genre,
+                corpus=CORPUS,
             ),
         )
         rec.status.separated = True  # a MedleyDB stem IS the isolated source

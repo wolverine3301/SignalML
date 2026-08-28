@@ -44,9 +44,10 @@ record with `gender` from the instrument label, `source_quality=studio`,
 `processing=produced` (stem level = the engineer's submix; `--level raw` imports the
 untouched takes as `dry`), `license_note` = CC BY-NC-SA 4.0, and `separated=true` — a
 MedleyDB stem *is* the isolated source, so Demucs is skipped and the stem is copied to
-`songs/<id>/stems/vocals.wav`. Provenance (track, stem key, instrument, component,
-bleed) lands in `analysis.json`. Idempotent by checksum; `--dry-run` lists the exact
-tags that would be written.
+`songs/<id>/stems/vocals.wav`. Records are tagged `corpus: medleydb`, so a recipe can
+scope a run to — or away from — this corpus. Provenance (track, stem key, instrument,
+component, bleed) lands in `analysis.json`. Idempotent by checksum; `--dry-run` lists
+the exact tags that would be written.
 
 Useful narrowing: `--melody-only` (lead vocal only — drops harmony/double stems),
 `--exclude-bleed`, `--allow-mixed` (stems whose `instrument` is a *list*, e.g.
