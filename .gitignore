@@ -26,6 +26,9 @@ uv.lock.tmp*
 !tests/fixtures/*.wav
 !tests/fixtures/*.npz
 
+# ship: provenance + patch dropped in by `signalml ship pull` on the receiver
+/.ship/
+
 # OS / editor noise
 .DS_Store
 Thumbs.db

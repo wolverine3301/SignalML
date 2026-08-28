@@ -77,3 +77,53 @@ def test_acquire_cli_requires_urls(tmp_path, capsys):
     rc = main(["acquire", "--data-root", str(tmp_path)])
     assert rc == 1
     assert "no URLs" in capsys.readouterr().err
+
+
+def test_ship_plan_cli(tmp_path, make_wav, capsys):
+    (tmp_path / "datasets" / "d1" / "alice-en" / "wavs").mkdir(parents=True)
+    (tmp_path / "datasets" / "d1" / "alice-en" / "wavs" / "sng_0001_000.wav").write_bytes(
+        b"RIFF" + b"\0" * 64)
+    (tmp_path / "datasets" / "d1" / "alice-en" / "transcriptions.csv").write_text(
+        "name,ph_seq,ph_dur\nsng_0001_000,SP aj SP,0.1 0.4 0.1\n", encoding="utf-8")
+    make_wav(tmp_path / "raw" / "song.wav")
+    main(["manifest", "scan", "--data-root", str(tmp_path), "--language", "en",
+          "--gender", "F", "--singer", "alice"])
+    capsys.readouterr()
+    rc = main(["ship", "plan", "--data-root", str(tmp_path), "--what", "dataset",
+               "--dataset-name", "d1", "--no-code"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "plan d1 (dataset)" in out
+    assert "next: signalml ship serve --name d1" in out
+    assert (tmp_path / "ship" / "d1" / "SHIP.json").exists()
+
+
+def test_ship_plan_cli_reports_a_missing_dataset(tmp_path, make_wav, capsys):
+    make_wav(tmp_path / "raw" / "song.wav")
+    main(["manifest", "scan", "--data-root", str(tmp_path), "--language", "en",
+          "--gender", "F", "--singer", "alice"])
+    capsys.readouterr()
+    rc = main(["ship", "plan", "--data-root", str(tmp_path), "--what", "dataset",
+               "--dataset-name", "nope", "--no-code"])
+    assert rc == 1
+    assert "does not exist" in capsys.readouterr().err
+
+
+def test_ship_serve_without_a_plan_is_an_error(tmp_path, capsys):
+    rc = main(["ship", "serve", "--data-root", str(tmp_path), "--name", "nope"])
+    assert rc == 1
+    assert "ship plan" in capsys.readouterr().err
+
+
+def test_ship_verify_missing_plan(tmp_path, capsys):
+    rc = main(["ship", "verify", "--data-root", str(tmp_path), "--name", "nope"])
+    assert rc == 1
+    assert "no plan at" in capsys.readouterr().err
+
+
+def test_doctor_cli_runs_and_reports(tmp_path, capsys):
+    rc = main(["doctor", "--data-root", str(tmp_path)])
+    assert rc in (0, 1)  # depends on the machine's torch/CUDA state
+    out = capsys.readouterr().out
+    assert "check(s):" in out
+    assert "DATA_ROOT" in out

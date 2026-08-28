@@ -89,10 +89,38 @@ python -m uv run signalml score from-midi verse.mid --lyrics verse.txt --out sco
 python -m uv run signalml score validate score.json
 ```
 
+## Moving a corpus to the training rig
+
+Dev happens on the laptop / work PC; prod training happens on the 5090 rig.
+`signalml ship` transfers a *selected* corpus plus the exact commit that produced it
+over the LAN, hash-verified and resumable; `signalml doctor` preflights the receiving
+machine. Full design and gotchas: `docs/notes/transfer.md`.
+
+```powershell
+# sender (holds DATA_ROOT) — plan a selection, then serve it
+signalml ship plan  --data-root Y:\SignalAI\DATA_ROOT --what rebuildable
+signalml ship serve --data-root Y:\SignalAI\DATA_ROOT --name full_acoustic_v1
+
+# receiver (the rig) — `serve` prints this line with the real address and token
+signalml ship pull http://10.0.0.144:8770/<token> --data-root D:\DATA_ROOT --repo-dir D:\SignalML
+powershell -ExecutionPolicy Bypass -File D:\SignalML\scripts\bootstrap_rig.ps1 -DataRoot D:\DATA_ROOT
+
+# before committing the GPU to a multi-day run
+signalml ship verify --data-root D:\DATA_ROOT --name full_acoustic_v1
+signalml doctor      --data-root D:\DATA_ROOT
+```
+
+`--what dataset` ships only `datasets/<name>/` (the trainer's input); `rebuildable`
+(default) ships `clean/` + `align/` for the songs the recipe selects, so the rig can
+rebuild datasets under new recipes without another transfer; `full` adds the stems.
+This repo has no git remote — the shipped git bundle *is* the rig's clone and its
+update path, and shipping refuses a dirty worktree so checkpoint git hashes stay honest.
+
 ## Layout
 
 - `signalml/` — the package: `audio/` primitives, `stages/` pipeline stages, `score/`,
-  `voices/`, `train/`, `synth/`, `tasks/masking/` (quarantined side tool), `cli.py`
+  `voices/`, `train/`, `synth/`, `net/` (LAN shipping), `tasks/masking/` (quarantined
+  side tool), `doctor.py`, `cli.py`
 - `configs/` — YAML configs (pydantic-validated)
 - `docs/` — architecture, contracts, migration plan, code survey
 - `archive/` — frozen 2023 experimental scripts (reference only, never import)
