@@ -161,6 +161,24 @@ class TestBuild:
         with pytest.raises(NotImplementedError, match="D1"):
             build(tmp_path, recipe=recipe(trainer="variance"))
 
+    def test_male_singer_excluded_by_gender_filter(self, tmp_path, make_wav):
+        """The female-only guarantee: a correctly tagged male record never reaches the
+        trainer, and the card says so (mixed-gender corpora, e.g. MedleyDB)."""
+        root = tmp_path / "dr"
+        female = _ready_song(root, make_wav, singer="alice")
+        male = _ready_song(root, make_wav, singer="bob")
+        manifest = Manifest.for_data_root(root)
+        rec = manifest.get(male)
+        rec.meta.gender = "M"
+        manifest.upsert(rec)
+        manifest.save()
+
+        summary = build(root, recipe=recipe())
+        assert summary.songs_used == [female]
+        assert summary.skipped[male] == "gender 'M' != 'F'"
+        card = (summary.out_dir / "dataset_card.md").read_text(encoding="utf-8")
+        assert "gender: F" in card and "bob" not in card
+
     def test_null_gender_refused(self, tmp_path, make_wav):
         root = tmp_path / "dr"
         make_wav(root / "raw" / "x.wav")

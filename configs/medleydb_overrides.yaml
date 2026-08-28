@@ -1,0 +1,40 @@
+# MedleyDB curation — the things its metadata cannot express.
+#
+# Used by `signalml manifest import-medleydb --overrides configs/medleydb_overrides.yaml`.
+# Keys are `Track` (whole track) or `Track:S05` (one stem); a stem entry wins over its
+# track entry. Fields: singer, gender, language, processing, song, exclude.
+#
+# Why this file exists: MedleyDB's finest identity label is `artist`, which is a *band*
+# (two different singers in one band would collapse to one key in the timbre space) and
+# for classical entries is the *composer*, not the performer. `singer` is the voice-bank
+# identity (ARCHITECTURE §4), so those get corrected here rather than silently imported.
+#
+# Only tracks needing a correction are listed. Everything else takes artist/en as-is.
+
+tracks:
+  # Opera: "artist" is Verdi (the composer). The performer is uncredited in MedleyDB,
+  # and the libretto is Italian — an `en` tag here would poison an English dataset.
+  Verdi_IlTrovatore:
+    singer: medleydb iltrovatore soprano
+    language: it
+
+  # Classical ensemble, uncredited soloist; the same soprano sings both movements, so
+  # they deliberately share one singer key. Both stems are flagged has_bleed.
+  TleilaxEnsemble_Late:
+    singer: tleilax ensemble soprano
+  TleilaxEnsemble_MelancholyFlowers:
+    singer: tleilax ensemble soprano
+
+  # Korean jazz vocalist (has_bleed: yes) — VERIFY the sung language by ear before
+  # this one enters an `en` dataset; uncomment and set if it is not English.
+  # SongYiJeon_TwoMoons:
+  #   language: ko
+
+  # --- harmony / double stems -------------------------------------------------
+  # These are the same singer as the track's lead, layered — fine for vocoder and
+  # timbre data, but they are stacked takes rather than a single natural performance.
+  # Uncomment to keep them out of imports (or just pass --melody-only).
+  # CatMartino_IPromise:S11: {exclude: true}
+  # Torres_NewSkin:S05: {exclude: true}
+  # Torres_NewSkin:S10: {exclude: true}
+  # Cayetana_MissThing:S07: {exclude: true}

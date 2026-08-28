@@ -63,6 +63,9 @@ MFA-only WSL2 Ubuntu env sharing the data directory (ARCHITECTURE §2).
 ```powershell
 # onboard existing audio (tag language/gender/source per corpus folder, Q13):
 python -m uv run signalml manifest scan --data-root D:\data --path raw\english --language en --gender F --source-quality separated
+# onboard MedleyDB vocal stems (gender/singer come from its per-stem instrument
+# taxonomy, not from a flag; --dry-run first — see docs/notes/medleydb.md):
+python -m uv run signalml manifest import-medleydb --data-root D:\data --overrides configs\medleydb_overrides.yaml --dry-run
 # corpus census: singers (voice-bank census), hours, lyrics coverage, stage status:
 python -m uv run signalml manifest report --data-root D:\data
 # after editing META.txt tags (PROCESSING: dry|produced|heavy, DOMAIN: sung|spoken,
