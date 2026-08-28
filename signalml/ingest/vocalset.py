@@ -55,12 +55,21 @@ SINGER_RE = re.compile(r"^([fm])(\d+)$")
 SINGER_DIR_RE = re.compile(r"^(female|male)\s*(\d+)$")
 VOWELS = frozenset("aeiou")
 CONTEXTS = ("long_tones", "arpeggios", "scales", "excerpts")
-# a few singers' folders/files use singular or spaced variants
+# real filenames carry abbreviations and typos ("arps", "arepggios"); the corpus was
+# hand-named, so normalise rather than trust it
 CONTEXT_ALIASES = {
-    "arpeggio": "arpeggios", "scale": "scales", "longtones": "long_tones",
-    "long tones": "long_tones", "excerpt": "excerpts",
+    "arpeggio": "arpeggios", "arps": "arpeggios", "arp": "arpeggios",
+    "arepggios": "arpeggios", "arpegios": "arpeggios",
+    "scale": "scales", "longtones": "long_tones", "long tones": "long_tones",
+    "excerpt": "excerpts",
 }
+TOKEN_FIXES = {"sow": "slow"}  # f_sow_forte -> f_slow_forte
+# the excerpts section is the only material sung on WORDS: three short pieces.
+# `row` is English; `caro` (Caro mio ben) is Italian; `dona` (Dona nobis pacem) Latin.
+EXCERPTS = {"caro": "caro mio ben", "row": "row row row your boat",
+            "dona": "dona nobis pacem"}
 SPOKEN_TECHNIQUES = frozenset({"spoken", "speaking"})
+DUPLICATE_RE = re.compile(r"^(.*?)\((\d+)\)$")  # "..._a(1).wav" duplicate marker
 
 
 @dataclass(frozen=True)
@@ -73,6 +82,8 @@ class VocalSetFile:
     context: str | None  # scales / arpeggios / long_tones / excerpts
     technique: str | None  # belt, vibrato, straight, lip_trill, spoken, ...
     vowel: str | None  # a e i o u
+    excerpt: str | None = None  # caro / row / dona — the only material with words
+    take: int | None = None  # trailing "(1)" or "_2" duplicate/take marker
 
     @property
     def singer(self) -> str:
@@ -82,7 +93,13 @@ class VocalSetFile:
 
     @property
     def domain(self) -> str:
-        return "spoken" if (self.technique or "") in SPOKEN_TECHNIQUES else "sung"
+        parts = (self.technique or "").split("_")
+        return "spoken" if SPOKEN_TECHNIQUES.intersection(parts) else "sung"
+
+    @property
+    def lyrics_hint(self) -> str | None:
+        """The words being sung, for the excerpts — everything else is vowels."""
+        return EXCERPTS.get(self.excerpt or "")
 
     @property
     def label(self) -> str:
@@ -115,10 +132,15 @@ def _singer_from_dirs(path: Path) -> str | None:
 def parse_filename(path: str | Path) -> VocalSetFile | None:
     """Parse one VocalSet WAV path. Returns None if it is not a VocalSet recording."""
     path = Path(path)
-    # some files are shipped with a leading underscore
-    tokens = [t for t in path.stem.lower().lstrip("_").split("_") if t]
+    # hand-named corpus: leading underscores, stray spaces, "(1)" duplicate markers
+    tokens = [t.strip() for t in path.stem.lower().lstrip("_").split("_") if t.strip()]
     if not tokens:
         return None
+    take = None
+    dup = DUPLICATE_RE.match(tokens[-1])
+    if dup:
+        take = int(dup.group(2))
+        tokens = tokens[:-1] + ([dup.group(1)] if dup.group(1) else [])
     m = SINGER_RE.match(tokens[0])
     if m:
         singer_id = f"{m.group(1)}{int(m.group(2))}"
@@ -132,7 +154,16 @@ def parse_filename(path: str | Path) -> VocalSetFile | None:
     vowel = None
     if rest and len(rest[-1]) == 1 and rest[-1] in VOWELS:
         vowel, rest = rest[-1], rest[:-1]
+    if take is None and rest and rest[-1].isdigit():  # belt_2 = second take
+        take, rest = int(rest[-1]), rest[:-1]
 
+    excerpt = None
+    for i, token in enumerate(rest):
+        if token in EXCERPTS:
+            excerpt, rest = token, rest[:i] + rest[i + 1:]
+            break
+
+    rest = [TOKEN_FIXES.get(t, t) for t in rest]
     context, rest = _match_context(rest)
     if context is None:  # fall back to the directory the file sits in
         parents = [p.name.lower().replace(" ", "_") for p in path.parents[:3]]
@@ -151,6 +182,8 @@ def parse_filename(path: str | Path) -> VocalSetFile | None:
         context=context,
         technique="_".join(rest) or None,
         vowel=vowel,
+        excerpt=excerpt,
+        take=take,
     )
 
 
@@ -283,6 +316,7 @@ def import_vocalset(
         rec.quality.notes = (
             f"vocalset context={item.context or 'unknown'} "
             f"technique={item.technique or 'none'} vowel={item.vowel or 'none'}"
+            + (f" excerpt={item.excerpt}" if item.excerpt else "")
         )
 
         sdir = song_dir(data_root, rec.id)
@@ -297,6 +331,11 @@ def import_vocalset(
                 "context": item.context,
                 "technique": item.technique,
                 "vowel": item.vowel,
+                "take": item.take,
+                # excerpts are the only VocalSet material sung on words; the text is
+                # known, so these are the files that could get lyrics sidecars later
+                "excerpt": item.excerpt,
+                "lyrics_hint": item.lyrics_hint,
                 "license": LICENSE_NOTE,
             },
             "date": date.today().isoformat(),

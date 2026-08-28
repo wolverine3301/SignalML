@@ -57,6 +57,21 @@ as `vocalset-f2` so ids cannot collide with another corpus. Technique/context/vo
 half that a female-only recipe refuses anyway just burns disk; `--contexts` and
 `--techniques` narrow further. Idempotent by checksum.
 
+### What actually landed (2026-08-27)
+
+`FULL/` extracted to `DATA_ROOT/vocalset/` (2.7 GB, 3613 WAVs, 44.1 kHz mono).
+**1619 female records / 3.9 h** across 9 singers; 3 files were byte-identical
+duplicates and deduped on checksum. The manifest went 428 -> 2047 records.
+
+Filenames are hand-made and messy — the parser normalises them: abbreviated and
+typo'd contexts (`arps`, `arepggios`), a misspelt `f_sow_forte`, stray leading spaces
+and underscores, and `(1)` duplicate markers. That takes the raw label set from 49
+strings down to 26 real techniques. The `excerpts` section is the only material sung on
+**words** — three short pieces (`caro` = Caro mio ben, Italian; `row` = Row row row your
+boat, English; `dona` = Dona nobis pacem, Latin) — so the excerpt name and its text are
+recorded in `analysis.json`; those 139 files are the ones that could take lyrics
+sidecars later and become alignable.
+
 ### Deliberate: `language` is null
 
 The material is sung on isolated vowels, so there are no lyrics and no language. Records

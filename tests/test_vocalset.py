@@ -49,10 +49,30 @@ class TestParseFilename:
         ("f2_long_tones_belt_o.wav", ("f2", "F", "long_tones", "belt", "o")),
         ("m11_scales_lip_trill_u.wav", ("m11", "M", "scales", "lip_trill", "u")),
         ("f3_excerpts_spoken.wav", ("f3", "F", "excerpts", "spoken", None)),
+        # real corpus messiness: typo'd/abbreviated contexts, stray spaces
+        ("f4_arepggios_c_fast_forte_a.wav", ("f4", "F", "arpeggios", "c_fast_forte", "a")),
+        ("m2_arps_c_fast_piano_e.wav", ("m2", "M", "arpeggios", "c_fast_piano", "e")),
+        ("f5_scales_f_sow_forte_o.wav", ("f5", "F", "scales", "f_slow_forte", "o")),
+        ("f6_ long_trillo_a.wav", ("f6", "F", None, "long_trillo", "a")),
     ])
     def test_tokens(self, name, expected):
         p = parse_filename(name)
         assert (p.singer_id, p.gender, p.context, p.technique, p.vowel) == expected
+
+    def test_excerpts_split_out_the_sung_words(self):
+        p = parse_filename("FULL/female9/excerpts/vibrato/f9_caro_vibrato.wav")
+        assert (p.excerpt, p.technique, p.context) == ("caro", "vibrato", "excerpts")
+        assert p.lyrics_hint == "caro mio ben"
+        # `row_spoken` must still register as speech, not as a technique called
+        # "row_spoken" (this is what makes domain=spoken work)
+        p = parse_filename("FULL/female9/excerpts/spoken/f9_row_spoken.wav")
+        assert (p.excerpt, p.technique, p.domain) == ("row", "spoken", "spoken")
+
+    def test_duplicate_and_take_markers(self):
+        p = parse_filename("f2_scales_vibrato_a(1).wav")
+        assert (p.technique, p.vowel, p.take) == ("vibrato", "a", 1)
+        p = parse_filename("f2_arpeggios_belt_2.wav")
+        assert (p.technique, p.take) == ("belt", 2)
 
     def test_singer_falls_back_to_the_folder(self):
         p = parse_filename("VocalSet/FULL/female3/scales/belt/_scales_belt_a.wav")
