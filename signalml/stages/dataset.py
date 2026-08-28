@@ -255,7 +255,11 @@ def build(
     phones_used: set[str] = set()
     per_folder_rows: dict[str, list[tuple[str, str, str]]] = {}
     per_speaker_stats: dict[str, dict] = {
-        s: {"clips": 0, "seconds": 0.0, "songs": 0} for s in singers}
+        s: {"clips": 0, "seconds": 0.0, "songs": 0,
+            # carried into the card so a gender-filtered build is auditable after
+            # the fact (mixed-gender corpora like MedleyDB tag gender per stem)
+            "gender": next(r.meta.gender for r in selected if r.meta.singer == s)}
+        for s in singers}
     licenses: set[str] = set()
     align_scores: list[float] = []
 
@@ -406,13 +410,13 @@ def _write_card(
         yaml.safe_dump(recipe.model_dump(), allow_unicode=True, sort_keys=False).rstrip(),
         "```",
         "\n## Speakers (spk_id table — voice-bank identities)\n",
-        "| spk_id | singer | songs | clips | minutes |",
-        "|---|---|---|---|---|",
+        "| spk_id | singer | gender | songs | clips | minutes |",
+        "|---|---|---|---|---|---|",
     ]
     for singer, sid in sorted(spk_ids.items(), key=lambda kv: kv[1]):
         s = per_speaker_stats[singer]
-        lines.append(f"| {sid} | {singer} | {s['songs']} | {s['clips']} | "
-                     f"{s['seconds'] / 60:.1f} |")
+        lines.append(f"| {sid} | {singer} | {s['gender'] or '?'} | {s['songs']} | "
+                     f"{s['clips']} | {s['seconds'] / 60:.1f} |")
     lines += [
         "\n## License roll-up\n",
         *[f"- {note}" for note in sorted(licenses)],

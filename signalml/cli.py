@@ -158,6 +158,51 @@ def _cmd_manifest_import_stems(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_manifest_import_medleydb(args: argparse.Namespace) -> int:
+    from .ingest.medleydb import import_medleydb
+    from .manifest import resolve_data_root
+
+    instruments = [i.strip() for i in args.instruments.split(",") if i.strip()]
+    manifest, new_records, skipped, planned = import_medleydb(
+        resolve_data_root(args.data_root),
+        audio_roots=args.audio_root,
+        metadata_dir=args.metadata_dir,
+        instruments=instruments,
+        level=args.level,
+        melody_only=args.melody_only,
+        include_bleed=not args.exclude_bleed,
+        include_mixed=args.allow_mixed,
+        language=args.language,
+        overrides_path=args.overrides,
+        dry_run=args.dry_run,
+    )
+    for plan in planned:  # exactly the tags that land in the manifest
+        print(f"  {plan.stem.label:46s} {plan.gender} {plan.language or '??':2s} "
+              f"{plan.processing:8s} {plan.singer} — {plan.song}"
+              f"{' [BLEED]' if plan.stem.has_bleed else ''}")
+    off_machine = sum(1 for r in skipped.values() if "not on this machine" in r)
+    for label, reason in sorted(skipped.items()):
+        if "not on this machine" not in reason:  # expected for a partial download
+            print(f"  SKIPPED {label}: {reason}", file=sys.stderr)
+    if args.dry_run:
+        from .manifest import probe_audio
+
+        hours = sum(probe_audio(p.stem.audio_path)[0] or 0.0 for p in planned) / 3600
+        print(f"import-medleydb (dry run): {len(planned)} stem(s) would be imported, "
+              f"~{hours:.2f} h; {off_machine} track(s) not downloaded")
+        return 0
+    manifest.save()
+    genders = sorted({rec.meta.gender for rec in new_records})
+    print(f"import-medleydb: {len(new_records)} imported (gender {genders}), "
+          f"{len(skipped) - off_machine} skipped, "
+          f"{off_machine} track(s) not downloaded")
+    if new_records:
+        print("NOTE: MedleyDB ships no lyrics — these records are vocoder/timbre data "
+              "until a .txt sidecar sits next to each source stem; `align` refuses "
+              "them meanwhile. Licence CC BY-NC-SA 4.0 is recorded on every record.")
+    return 0
+
+
 def _cmd_manifest_retag(args: argparse.Namespace) -> int:
     from .manifest import RETAG_SAFE_FIELDS, resolve_data_root, retag_from_sidecars
 
@@ -360,6 +405,44 @@ def main(argv: list[str] | None = None) -> int:
                          help="comma list (default: processing,domain,genre — singer/"
                               "song excluded so manifest fixes aren't clobbered)")
     retag_p.set_defaults(func=_cmd_manifest_retag)
+    mdb_p = manifest_sub.add_parser(
+        "import-medleydb",
+        help="onboard MedleyDB vocal stems using its per-stem instrument taxonomy",
+    )
+    mdb_p.add_argument("--data-root", default=None,
+                       help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    mdb_p.add_argument("--metadata-dir", default=None,
+                       help="MedleyDB *_METADATA.yaml folder "
+                            "(default: <data-root>/medleydb/Metadata)")
+    mdb_p.add_argument("--audio-root", action="append", default=None,
+                       help="folder holding MedleyDB track directories; repeatable "
+                            "(default: auto-discover under the data root)")
+    mdb_p.add_argument("--instruments", default="female singer",
+                       help="comma list of MedleyDB vocal instrument labels to import "
+                            "(default: 'female singer'; also known: male singer, "
+                            "male rapper, male speaker)")
+    mdb_p.add_argument("--level", default="stem", choices=["stem", "raw"],
+                       help="stem = engineer's processed submix (processing=produced); "
+                            "raw = untouched mic/DI feed, one record per take "
+                            "(processing=dry)")
+    mdb_p.add_argument("--melody-only", action="store_true",
+                       help="only stems tagged component: melody (lead vocal; drops "
+                            "harmony/double stems)")
+    mdb_p.add_argument("--exclude-bleed", action="store_true",
+                       help="skip tracks flagged has_bleed: yes (other sources leak "
+                            "into the vocal stem)")
+    mdb_p.add_argument("--allow-mixed", action="store_true",
+                       help="take stems whose instrument list names more than one "
+                            "source (e.g. [male singer, vocalists]) — the vocal is "
+                            "not isolated in those")
+    mdb_p.add_argument("--language", default="en",
+                       help="tag new records (override per track in the overrides file)")
+    mdb_p.add_argument("--overrides", default=None,
+                       help="YAML of per-track/per-stem singer/gender/language/exclude "
+                            "fixes, e.g. configs/medleydb_overrides.yaml")
+    mdb_p.add_argument("--dry-run", action="store_true",
+                       help="report what would be imported; copy and write nothing")
+    mdb_p.set_defaults(func=_cmd_manifest_import_medleydb)
 
     # acquire
     acquire_p = subparsers.add_parser("acquire", help="[P1] download audio via yt-dlp")
