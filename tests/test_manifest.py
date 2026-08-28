@@ -10,6 +10,7 @@ from signalml.manifest import (
     ManifestRecord,
     resolve_data_root,
     scan_directory,
+    set_corpus,
     sha256_file,
 )
 
@@ -72,6 +73,52 @@ def test_lookup_by_url_and_sha(tmp_path):
     assert m.by_url("https://example.com/v").id == "sng_0001"
     assert m.by_sha256("deadbeef").id == "sng_0001"
     assert m.by_url("https://example.com/other") is None
+
+
+class TestSetCorpus:
+    def _corpus_root(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        for i, name in enumerate(("a", "b")):
+            make_wav(root / "RAW" / name / "take.wav", hz=200.0 + 40 * i)
+        manifest, _ = scan_directory(root, subpath="RAW")
+        manifest.save()
+        return root, manifest
+
+    def test_backfills_untagged_records(self, tmp_path, make_wav):
+        root, _ = self._corpus_root(tmp_path, make_wav)
+        manifest, changes = set_corpus(root, corpus="Own Corpus")
+        manifest.save()
+        assert len(changes) == 2
+        assert {r.meta.corpus for r in manifest.records} == {"own-corpus"}
+
+    def test_leaves_tagged_records_alone_without_force(self, tmp_path, make_wav):
+        root, manifest = self._corpus_root(tmp_path, make_wav)
+        first = manifest.records[0]
+        first.meta.corpus = "medleydb"
+        manifest.upsert(first)
+        manifest.save()
+
+        manifest, changes = set_corpus(root, corpus="own")
+        manifest.save()
+        assert [c[0] for c in changes] == [manifest.records[1].id]
+        assert manifest.get(first.id).meta.corpus == "medleydb"
+
+        manifest, changes = set_corpus(root, corpus="own", only_untagged=False)
+        manifest.save()
+        assert manifest.get(first.id).meta.corpus == "own"
+
+    def test_targets_explicit_ids(self, tmp_path, make_wav):
+        root, manifest = self._corpus_root(tmp_path, make_wav)
+        target = manifest.records[0].id
+        manifest, changes = set_corpus(root, corpus="own", ids=[target])
+        manifest.save()
+        assert [c[0] for c in changes] == [target]
+        assert manifest.records[1].meta.corpus is None
+
+    def test_unknown_id_raises(self, tmp_path, make_wav):
+        root, _ = self._corpus_root(tmp_path, make_wav)
+        with pytest.raises(KeyError, match="sng_9999"):
+            set_corpus(root, corpus="own", ids=["sng_9999"])
 
 
 def test_resolve_data_root_precedence(tmp_path, monkeypatch):
@@ -286,6 +333,18 @@ class TestScan:
         manifest2, new2 = scan_directory(root)
         assert new2 == []
         assert len(manifest2) == 1
+
+    def test_scan_tags_corpus_and_sidecar_wins(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        make_wav(root / "RAW" / "a" / "take.wav")
+        song = root / "RAW" / "b"
+        make_wav(song / "take.wav", hz=333.0)
+        (song / "META.txt").write_text("CORPUS:Session Tapes", encoding="utf-8")
+
+        _, new = scan_directory(root, subpath="RAW", corpus="own")
+        by_corpus = sorted(r.meta.corpus for r in new)
+        # per-song META.txt beats the blanket flag; slugs are normalised
+        assert by_corpus == ["own", "session-tapes"]
 
     def test_scan_missing_path_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):

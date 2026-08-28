@@ -40,6 +40,7 @@ def _cmd_manifest_scan(args: argparse.Namespace) -> int:
         gender=args.gender,
         singer=args.singer,
         source_quality=args.source_quality,
+        corpus=args.corpus,
     )
     manifest.save()
     print(f"Scanned {data_root / args.path}: {len(new_records)} new record(s), "
@@ -142,6 +143,7 @@ def _cmd_manifest_import_stems(args: argparse.Namespace) -> int:
         language=args.language,
         gender=args.gender,
         source_quality=args.source_quality,
+        corpus=args.corpus,
     )
     manifest.save()
     dupes = sum(1 for r in skipped.values() if "duplicate" in r)
@@ -200,6 +202,58 @@ def _cmd_manifest_import_medleydb(args: argparse.Namespace) -> int:
         print("NOTE: MedleyDB ships no lyrics — these records are vocoder/timbre data "
               "until a .txt sidecar sits next to each source stem; `align` refuses "
               "them meanwhile. Licence CC BY-NC-SA 4.0 is recorded on every record.")
+    return 0
+
+
+def _cmd_manifest_import_vocalset(args: argparse.Namespace) -> int:
+    from .ingest.vocalset import import_vocalset, summarize
+    from .manifest import resolve_data_root
+
+    def _split(value):
+        return [v.strip() for v in value.split(",") if v.strip()] if value else None
+
+    manifest, new_records, skipped, selected = import_vocalset(
+        resolve_data_root(args.data_root),
+        root=args.path,
+        genders=_split(args.genders) or ["F"],
+        contexts=_split(args.contexts),
+        techniques=_split(args.techniques),
+        language=args.language,
+        limit=args.limit,
+        dry_run=args.dry_run,
+    )
+    print(summarize(selected))
+    for label, reason in sorted(skipped.items()):
+        if "checksum" not in reason:  # re-runs are expected to hit those
+            print(f"  SKIPPED {label}: {reason}", file=sys.stderr)
+    if args.dry_run:
+        print(f"import-vocalset (dry run): {len(selected)} file(s) would be imported")
+        return 0
+    manifest.save()
+    already = sum(1 for r in skipped.values() if "checksum" in r)
+    print(f"import-vocalset: {len(new_records)} imported, {already} already in the "
+          f"manifest, {len(manifest)} records total")
+    if new_records:
+        print("NOTE: VocalSet is sung on isolated vowels — no lyrics, so language is "
+              "left null and these stay out of `en` acoustic datasets. Licence CC BY "
+              "4.0 (the only permissive corpus here).")
+    return 0
+
+
+def _cmd_manifest_set_corpus(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root, set_corpus
+
+    ids = [i.strip() for i in args.ids.split(",") if i.strip()] if args.ids else None
+    manifest, changes = set_corpus(
+        resolve_data_root(args.data_root),
+        corpus=args.name,
+        ids=ids,
+        only_untagged=not args.force,
+    )
+    manifest.save()
+    for rid, old, new in changes:
+        print(f"  {rid}: corpus {old!r} -> {new!r}")
+    print(f"set-corpus: {len(changes)} record(s) tagged {args.name!r}")
     return 0
 
 
@@ -375,6 +429,9 @@ def main(argv: list[str] | None = None) -> int:
     scan_p.add_argument("--singer", default=None, help="tag new records")
     scan_p.add_argument("--source-quality", default=None, choices=["studio", "separated"],
                         help="tag new records: studio stems vs to-be-Demucs'd mixes")
+    scan_p.add_argument("--corpus", default=None,
+                        help="corpus slug for new records (e.g. own, medleydb) — "
+                             "dataset recipes scope training runs by corpus")
     scan_p.set_defaults(func=_cmd_manifest_scan)
     report_p = manifest_sub.add_parser(
         "report", help="corpus census: singers/hours/languages/lyrics coverage/status"
@@ -395,6 +452,7 @@ def main(argv: list[str] | None = None) -> int:
     import_p.add_argument("--source-quality", default="separated",
                           choices=["studio", "separated"],
                           help="studio = real dry stems (also defaults processing=dry)")
+    import_p.add_argument("--corpus", default=None, help="corpus slug for new records")
     import_p.set_defaults(func=_cmd_manifest_import_stems)
     retag_p = manifest_sub.add_parser(
         "retag", help="refresh tag fields on existing records from META.txt sidecars"
@@ -443,6 +501,42 @@ def main(argv: list[str] | None = None) -> int:
     mdb_p.add_argument("--dry-run", action="store_true",
                        help="report what would be imported; copy and write nothing")
     mdb_p.set_defaults(func=_cmd_manifest_import_medleydb)
+
+    vs_p = manifest_sub.add_parser(
+        "import-vocalset",
+        help="onboard VocalSet a cappella technique recordings (CC BY 4.0)",
+    )
+    vs_p.add_argument("--data-root", default=None,
+                      help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    vs_p.add_argument("--path", default=None,
+                      help="extracted VocalSet folder (default: <data-root>/vocalset)")
+    vs_p.add_argument("--genders", default="F",
+                      help="comma list F,M — gender comes from the filename's singer "
+                           "id (default: F)")
+    vs_p.add_argument("--contexts", default=None,
+                      help="comma list: scales,arpeggios,long_tones,excerpts "
+                           "(default: all)")
+    vs_p.add_argument("--techniques", default=None,
+                      help="comma list of techniques, e.g. straight,vibrato,belt "
+                           "(default: all)")
+    vs_p.add_argument("--language", default=None,
+                      help="normally left null: VocalSet is sung on vowels, not words")
+    vs_p.add_argument("--limit", type=int, default=None,
+                      help="import at most N files (smoke tests)")
+    vs_p.add_argument("--dry-run", action="store_true",
+                      help="report the census; copy and write nothing")
+    vs_p.set_defaults(func=_cmd_manifest_import_vocalset)
+    corpus_p = manifest_sub.add_parser(
+        "set-corpus", help="backfill meta.corpus on existing records"
+    )
+    corpus_p.add_argument("name", help="corpus slug, e.g. own")
+    corpus_p.add_argument("--data-root", default=None,
+                          help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    corpus_p.add_argument("--ids", default=None,
+                          help="comma list of record ids (default: every record)")
+    corpus_p.add_argument("--force", action="store_true",
+                          help="also overwrite records that already name a corpus")
+    corpus_p.set_defaults(func=_cmd_manifest_set_corpus)
 
     # acquire
     acquire_p = subparsers.add_parser("acquire", help="[P1] download audio via yt-dlp")

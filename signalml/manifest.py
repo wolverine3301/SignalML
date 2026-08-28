@@ -67,6 +67,10 @@ class MetaInfo(BaseModel):
     # everything sung so far defaults accordingly
     domain: Literal["sung", "spoken"] = "sung"
     genre: str | None = None  # from META.txt GENRE: (covers-experiment analysis, style tags)
+    # which corpus a record came from ("medleydb", "vocalset", "own", ...). Dataset
+    # recipes select/exclude on it, so a training run can be scoped to one corpus, to
+    # a combination, or to everything permissively licensed. None = untagged.
+    corpus: str | None = None
 
 
 class StatusFlags(BaseModel):
@@ -279,6 +283,15 @@ def _normalize_singer(value: str | None) -> str | None:
     return cleaned or None
 
 
+def _normalize_corpus(value: str | None) -> str | None:
+    """Corpus slugs are the join key across ingest adapters and dataset recipes, so
+    they are normalised hard: lowercase, no surrounding space, spaces -> hyphens."""
+    if value is None:
+        return None
+    cleaned = "-".join(str(value).split()).lower()
+    return cleaned or None
+
+
 _PROCESSING_VALUES = ("dry", "produced", "heavy")
 _DOMAIN_VALUES = ("sung", "spoken")
 
@@ -308,7 +321,7 @@ def _processing_from_sidecar(sidecar: dict[str, str]) -> str | None:
 
 def _read_meta_sidecar(audio_path: Path) -> dict[str, str]:
     """Parse a ``META.txt`` next to the audio (corpus convention): ``KEY:value`` lines
-    (SONG/SINGER/ARTIST/GENRE/TYPE/QUALITY). Empty values are dropped."""
+    (SONG/SINGER/ARTIST/GENRE/TYPE/QUALITY/CORPUS). Empty values are dropped."""
     meta_path = audio_path.parent / "META.txt"
     if not meta_path.exists():
         return {}
@@ -328,6 +341,7 @@ def scan_directory(
     gender: Literal["F", "M"] | None = None,
     singer: str | None = None,
     source_quality: Literal["studio", "separated"] | None = None,
+    corpus: str | None = None,
 ) -> tuple[Manifest, list[ManifestRecord]]:
     """Backfill manifest records for audio files already under ``data_root/subpath``.
 
@@ -375,6 +389,7 @@ def scan_directory(
                 processing=_processing_from_sidecar(sidecar),
                 domain=_valid_tag(sidecar.get("DOMAIN"), _DOMAIN_VALUES) or "sung",
                 genre=(sidecar.get("GENRE") or "").strip().lower() or None,
+                corpus=_normalize_corpus(sidecar.get("CORPUS") or corpus),
             ),
         )
         manifest.add(rec)
@@ -401,6 +416,7 @@ def import_stem_folders(
     gender: Literal["F", "M"] | None = None,
     stem_filename: str = "vocals.wav",
     source_quality: Literal["studio", "separated"] = "separated",
+    corpus: str | None = None,
 ) -> tuple[Manifest, list[ManifestRecord], dict[str, str]]:
     """Onboard pre-separated one-song-per-folder stems (vocals.wav [+ accompaniment])
     without running Demucs: the vocal stem is copied into ``songs/<id>/stems/`` and
@@ -468,6 +484,7 @@ def import_stem_folders(
                 or ("dry" if source_quality == "studio" else None),
                 domain=_valid_tag(sidecar.get("DOMAIN"), _DOMAIN_VALUES) or "sung",
                 genre=(sidecar.get("GENRE") or "").strip().lower() or None,
+                corpus=_normalize_corpus(sidecar.get("CORPUS") or corpus),
             ),
         )
         rec.status.separated = True
@@ -491,7 +508,7 @@ def import_stem_folders(
     return manifest, new_records, skipped
 
 
-RETAG_SAFE_FIELDS = ("processing", "domain", "genre")
+RETAG_SAFE_FIELDS = ("processing", "domain", "genre", "corpus")
 
 
 def retag_from_sidecars(
@@ -534,6 +551,8 @@ def retag_from_sidecars(
                 new_values["domain"] = value
         if "genre" in fields and sidecar.get("GENRE"):
             new_values["genre"] = sidecar["GENRE"].strip().lower()
+        if "corpus" in fields and sidecar.get("CORPUS"):
+            new_values["corpus"] = _normalize_corpus(sidecar["CORPUS"])
         if "singer" in fields and sidecar.get("SINGER"):
             new_values["singer"] = _normalize_singer(sidecar["SINGER"])
         if "song" in fields and sidecar.get("SONG"):
@@ -547,6 +566,44 @@ def retag_from_sidecars(
         manifest.upsert(rec)
 
     return manifest, changes, warnings
+
+
+def set_corpus(
+    data_root: str | Path,
+    *,
+    corpus: str,
+    ids: list[str] | None = None,
+    only_untagged: bool = True,
+) -> tuple[Manifest, list[tuple[str, str | None, str]]]:
+    """Backfill ``meta.corpus`` on existing records. Caller saves.
+
+    The corpus tag arrives after records already exist (adapters set it at ingest,
+    but the hand-onboarded corpus predates the field), so this stamps them in one
+    pass. ``only_untagged`` is the default because retagging a record that already
+    names its corpus is almost always a mistake. Returns (manifest, changes as
+    (id, old, new)).
+    """
+    manifest = Manifest.for_data_root(data_root)
+    value = _normalize_corpus(corpus)
+    if not value:
+        raise ValueError("corpus name is empty")
+    wanted = set(ids or [])
+    unknown = wanted - {rec.id for rec in manifest.records}
+    if unknown:
+        raise KeyError(f"no such record(s): {sorted(unknown)}")
+
+    changes: list[tuple[str, str | None, str]] = []
+    for rec in manifest.records:
+        if wanted and rec.id not in wanted:
+            continue
+        if only_untagged and rec.meta.corpus:
+            continue
+        if rec.meta.corpus == value:
+            continue
+        changes.append((rec.id, rec.meta.corpus, value))
+        rec.meta.corpus = value
+        manifest.upsert(rec)
+    return manifest, changes
 
 
 def _hours(records: list[ManifestRecord]) -> float:
@@ -572,6 +629,7 @@ def manifest_report(manifest: Manifest) -> str:
             b = buckets[name]
             lines.append(f"  {name}: {len(b)} song(s), {_hours(b)} h")
 
+    group("by corpus", lambda r: r.meta.corpus)
     group("by language", lambda r: r.meta.language)
     group("by gender", lambda r: r.meta.gender)
     group("by domain", lambda r: r.meta.domain)

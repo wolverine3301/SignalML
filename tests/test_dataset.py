@@ -179,6 +179,34 @@ class TestBuild:
         card = (summary.out_dir / "dataset_card.md").read_text(encoding="utf-8")
         assert "gender: F" in card and "bob" not in card
 
+    def test_corpus_scoping(self, tmp_path, make_wav):
+        """Recipes select a corpus, a combination, or everything-but — the knob for
+        'train on VocalSet + my own material but not the NC corpora'."""
+        root = tmp_path / "dr"
+        own = _ready_song(root, make_wav, singer="alice")
+        borrowed = _ready_song(root, make_wav, singer="bob")
+        manifest = Manifest.for_data_root(root)
+        for rid, corpus in ((own, "own"), (borrowed, "medleydb")):
+            rec = manifest.get(rid)
+            rec.meta.corpus = corpus
+            manifest.upsert(rec)
+        manifest.save()
+
+        summary = build(root, recipe=recipe(
+            name="t_only", filters={"corpora": ["own"]}))
+        assert summary.songs_used == [own]
+        assert "not in recipe corpora" in summary.skipped[borrowed]
+
+        summary = build(root, recipe=recipe(
+            name="t_excl", filters={"exclude_corpora": ["medleydb"]}))
+        assert summary.songs_used == [own]
+        assert summary.skipped[borrowed] == "corpus 'medleydb' excluded by recipe"
+
+        summary = build(root, recipe=recipe(name="t_both"))  # no corpus filter
+        assert sorted(summary.songs_used) == sorted([own, borrowed])
+        card = (summary.out_dir / "dataset_card.md").read_text(encoding="utf-8")
+        assert "- own" in card and "- medleydb" in card
+
     def test_null_gender_refused(self, tmp_path, make_wav):
         root = tmp_path / "dr"
         make_wav(root / "raw" / "x.wav")

@@ -44,6 +44,11 @@ class DatasetFilters(BaseModel):
     domain: str = "sung"
     language: str = "en"
     gender: str | None = "F"
+    # corpus scoping: [] = every corpus. `corpora` whitelists (one corpus, or a
+    # combination); `exclude_corpora` blacklists (e.g. drop non-commercial sources
+    # from a run that has to ship). Untagged records read as "(untagged)".
+    corpora: list[str] = []
+    exclude_corpora: list[str] = []
     min_align_score: float = 0.8
     exclude_processing: list[str] = ["heavy"]
     singers: list[str] = []  # empty = all singers
@@ -197,6 +202,11 @@ def _select(manifest: Manifest, recipe: DatasetRecipe, summary: BuildSummary,
         elif f.gender and rec.meta.gender != f.gender:
             reason = "gender is null (tag it)" if rec.meta.gender is None else \
                 f"gender {rec.meta.gender!r} != {f.gender!r}"
+        elif f.corpora and rec.meta.corpus not in f.corpora:
+            reason = (f"corpus {rec.meta.corpus or '(untagged)'!r} not in "
+                      f"recipe corpora {f.corpora}")
+        elif rec.meta.corpus in f.exclude_corpora:
+            reason = f"corpus {rec.meta.corpus!r} excluded by recipe"
         elif f.singers and rec.meta.singer not in f.singers:
             reason = "singer not in recipe whitelist"
         elif rec.meta.singer is None:
@@ -261,6 +271,7 @@ def build(
             "gender": next(r.meta.gender for r in selected if r.meta.singer == s)}
         for s in singers}
     licenses: set[str] = set()
+    corpora: set[str] = set()
     align_scores: list[float] = []
 
     for rec in selected:
@@ -300,6 +311,7 @@ def build(
         summary.clips += len(clips)
         summary.seconds += sum(c.end - c.start for c in clips)
         licenses.add(rec.meta.license_note or "(none recorded)")
+        corpora.add(rec.meta.corpus or "(untagged)")
         align_scores.append(rec.quality.align_score)
 
     for folder, rows in per_folder_rows.items():
@@ -312,7 +324,7 @@ def build(
     _write_dictionary(out_dir, phones_used, recipe.filters.language)
     _write_trainer_config(out_dir, recipe, selected, spk_ids, per_folder_rows)
     _write_card(out_dir, recipe, summary, per_speaker_stats, spk_ids, licenses,
-                align_scores)
+                corpora, align_scores)
     return summary
 
 
@@ -395,6 +407,7 @@ def _write_card(
     per_speaker_stats: dict[str, dict],
     spk_ids: dict[str, int],
     licenses: set[str],
+    corpora: set[str],
     align_scores: list[float],
 ) -> None:
     lines = [
@@ -418,6 +431,8 @@ def _write_card(
         lines.append(f"| {sid} | {singer} | {s['gender'] or '?'} | {s['songs']} | "
                      f"{s['clips']} | {s['seconds'] / 60:.1f} |")
     lines += [
+        "\n## Corpora\n",
+        *[f"- {name}" for name in sorted(corpora)],
         "\n## License roll-up\n",
         *[f"- {note}" for note in sorted(licenses)],
         "\n## Skipped records\n",
