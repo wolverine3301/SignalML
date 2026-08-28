@@ -392,6 +392,149 @@ def _cmd_dash(args: argparse.Namespace) -> int:
     return 0
 
 
+def _gb(nbytes: int) -> str:
+    return f"{nbytes / (1 << 30):.2f} GB"
+
+
+def _ship_plan_path(args: argparse.Namespace):
+    """--plan wins; otherwise the plan this data root stored for --name."""
+    from pathlib import Path
+
+    from .manifest import resolve_data_root
+    from .net.plan import PLAN_NAME, stage_dir
+
+    if getattr(args, "plan", None):
+        return Path(args.plan)
+    return stage_dir(resolve_data_root(args.data_root), args.name) / PLAN_NAME
+
+
+def _cmd_ship_plan(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .net.plan import PLAN_NAME, build_plan, stage_dir
+    from .stages.dataset import load_dataset_recipe
+
+    data_root = resolve_data_root(args.data_root)
+    recipe = load_dataset_recipe(args.recipe) if args.recipe or args.what != "dataset" \
+        else None
+    try:
+        plan = build_plan(
+            data_root,
+            what=args.what,
+            name=args.name,
+            recipe=recipe,
+            dataset_name=args.dataset_name,
+            with_code=not args.no_code,
+            with_features=args.with_features,
+            with_raw=args.with_raw,
+            allow_dirty=args.allow_dirty,
+        )
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(f"ship plan: {exc}", file=sys.stderr)
+        return 1
+
+    kinds: dict[str, list[int]] = {}
+    for item in plan.items:
+        top = item.path.split("/")[0] if item.dest == "data" else "code"
+        entry = kinds.setdefault(top, [0, 0])
+        entry[0] += 1
+        entry[1] += item.size
+    print(f"plan {plan.name} ({plan.what}): {len(plan.items)} item(s), "
+          f"{_gb(plan.total_bytes)}, {len(plan.song_ids)} song(s)")
+    width = max((len(k) for k in kinds), default=0)
+    for top, (n, size) in sorted(kinds.items(), key=lambda kv: -kv[1][1]):
+        print(f"  {top.ljust(width)} {n:>6} file(s)  {_gb(size)}")
+    if plan.git:
+        print(f"  code         {plan.git.branch} @ {plan.git.commit[:8]}"
+              f"{' (DIRTY)' if plan.git.dirty else ''}")
+    for note in plan.notes:
+        print(f"  NOTE: {note}")
+    print(f"wrote {stage_dir(data_root, plan.name) / PLAN_NAME}")
+    print(f"next: signalml ship serve --name {plan.name}")
+    return 0
+
+
+def _cmd_ship_serve(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .net.plan import REPO_ROOT, ShipPlan
+    from .net.server import serve
+
+    path = _ship_plan_path(args)
+    if not path.exists():
+        print(f"no plan at {path} — run `signalml ship plan` first", file=sys.stderr)
+        return 1
+    serve(ShipPlan.load(path), data_root=resolve_data_root(args.data_root),
+          repo_root=REPO_ROOT, host=args.host, port=args.port, token=args.token)
+    return 0
+
+
+def _cmd_ship_pull(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from .manifest import resolve_data_root
+    from .net.client import pull
+
+    repo_root = Path(args.repo_dir) if args.repo_dir else None
+    if repo_root is None and not args.no_code:
+        print("ship pull: --repo-dir is required unless --no-code "
+              "(it is where the git bundle is cloned/updated)", file=sys.stderr)
+        return 1
+    summary = pull(args.url, data_root=resolve_data_root(args.data_root),
+                   repo_root=repo_root, apply_code=not args.no_code)
+    print(f"pulled {summary.plan.name}: {summary.fetched} file(s) "
+          f"({_gb(summary.bytes_fetched)}), {summary.skipped} already present")
+    if summary.manifest_merged:
+        print(f"  manifest: {summary.manifest_merged} record(s) merged")
+    if summary.code_action:
+        print(f"  code: {summary.code_action}")
+    for note in summary.notes:
+        print(f"  NOTE: {note}")
+    for path, why in sorted(summary.failed.items()):
+        print(f"  FAILED {path}: {why}", file=sys.stderr)
+    if summary.failed:
+        print(f"{len(summary.failed)} item(s) failed — re-run the same pull command; "
+              f"it resumes.", file=sys.stderr)
+        return 1
+    print(f"next: signalml doctor --data-root {args.data_root or '<DATA_ROOT>'}")
+    return 0
+
+
+def _cmd_ship_verify(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .net.plan import ShipPlan, verify
+
+    path = _ship_plan_path(args)
+    if not path.exists():
+        print(f"no plan at {path}", file=sys.stderr)
+        return 1
+    plan = ShipPlan.load(path)
+    result = verify(plan, data_root=resolve_data_root(args.data_root),
+                    repo_root=args.repo_dir)
+    print(f"verify {plan.name}: {len(result.ok)} ok, {len(result.missing)} missing, "
+          f"{len(result.corrupt)} corrupt, {len(result.skipped)} skipped")
+    for path_ in result.missing[:20]:
+        print(f"  MISSING {path_}", file=sys.stderr)
+    for path_ in result.corrupt[:20]:
+        print(f"  CORRUPT {path_}", file=sys.stderr)
+    if not result.clean:
+        print("re-run `signalml ship pull` with the sender serving; it re-fetches "
+              "only what does not match.", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    from .doctor import format_report, has_failures, run_checks
+    from .net.plan import ShipPlan
+
+    need = 0
+    if args.plan:
+        need = ShipPlan.load(args.plan).total_bytes
+    checks = run_checks(data_root=args.data_root, need_bytes=need,
+                        with_mfa=args.check_mfa)
+    print(format_report(checks))
+    return 1 if has_failures(checks) else 0
+
+
 def _add_stub(subparsers: argparse._SubParsersAction, name: str) -> None:
     phase, desc = STAGES[name]
     p = subparsers.add_parser(name, help=f"[{phase}] {desc}")
@@ -646,6 +789,78 @@ def main(argv: list[str] | None = None) -> int:
     dash_p.add_argument("--no-open", action="store_true",
                         help="don't open the browser automatically")
     dash_p.set_defaults(func=_cmd_dash)
+
+    # ship — LAN transfer of a corpus selection + the code that produced it
+    ship_p = subparsers.add_parser(
+        "ship", help="transfer a corpus selection + this repo to the training rig")
+    ship_sub = ship_p.add_subparsers(dest="command", required=True)
+
+    plan_p = ship_sub.add_parser(
+        "plan", help="resolve a selection into SHIP.json (paths + sizes + sha256)")
+    plan_p.add_argument("--data-root", default=None,
+                        help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    plan_p.add_argument("--what", default="rebuildable",
+                        choices=["dataset", "rebuildable", "full"],
+                        help="dataset = trainer input only; rebuildable = clean/ + "
+                             "align/ so the rig can rebuild recipes; full = + stems")
+    plan_p.add_argument("--name", default=None,
+                        help="shipment name (default: the dataset/recipe name)")
+    plan_p.add_argument("--dataset-name", default=None,
+                        help="datasets/<name>/ to ship (--what dataset)")
+    plan_p.add_argument("--recipe", default=None,
+                        help="recipe yaml selecting the songs (default: configs/dataset.yaml)")
+    plan_p.add_argument("--with-features", action="store_true",
+                        help="include features/vocals.npz (recomputable on the rig)")
+    plan_p.add_argument("--with-raw", action="store_true",
+                        help="include the as-provided source audio for each song")
+    plan_p.add_argument("--no-code", action="store_true",
+                        help="skip the git bundle (data only)")
+    plan_p.add_argument("--allow-dirty", action="store_true",
+                        help="allow shipping from a dirty worktree (captures a patch)")
+    plan_p.set_defaults(func=_cmd_ship_plan)
+
+    serve_p = ship_sub.add_parser("serve", help="serve a plan over the LAN (sender)")
+    serve_p.add_argument("--data-root", default=None,
+                         help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    serve_p.add_argument("--name", default=None, help="shipment name to serve")
+    serve_p.add_argument("--plan", default=None, help="explicit SHIP.json path")
+    serve_p.add_argument("--host", default="0.0.0.0",
+                         help="bind address; set the LAN IP explicitly if VPN or WSL "
+                              "adapters confuse the default route")
+    serve_p.add_argument("--port", type=int, default=8770)
+    serve_p.add_argument("--token", default=None,
+                         help="reuse a token (default: fresh random per run)")
+    serve_p.set_defaults(func=_cmd_ship_serve)
+
+    pull_p = ship_sub.add_parser("pull", help="fetch a served plan (receiver/rig)")
+    pull_p.add_argument("url", help="http://<sender>:<port>/<token> as printed by serve")
+    pull_p.add_argument("--data-root", default=None,
+                        help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    pull_p.add_argument("--repo-dir", default=None,
+                        help="where to clone/update the repo from the shipped bundle")
+    pull_p.add_argument("--no-code", action="store_true",
+                        help="data only; leave the repo alone")
+    pull_p.set_defaults(func=_cmd_ship_pull)
+
+    ver_p = ship_sub.add_parser(
+        "verify", help="re-hash a landed shipment (run before a training run)")
+    ver_p.add_argument("--data-root", default=None,
+                       help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    ver_p.add_argument("--name", default=None, help="shipment name to verify")
+    ver_p.add_argument("--plan", default=None, help="explicit SHIP.json path")
+    ver_p.add_argument("--repo-dir", default=None, help="repo root, to check code items")
+    ver_p.set_defaults(func=_cmd_ship_verify)
+
+    # doctor — preflight this machine
+    doctor_p = subparsers.add_parser(
+        "doctor", help="preflight: python/uv/torch-CUDA/submodule/DATA_ROOT/disk")
+    doctor_p.add_argument("--data-root", default=None,
+                          help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    doctor_p.add_argument("--plan", default=None,
+                          help="SHIP.json to size the free-space check against")
+    doctor_p.add_argument("--check-mfa", action="store_true",
+                          help="also probe the conda 'aligner' env (slow; alignment only)")
+    doctor_p.set_defaults(func=_cmd_doctor)
 
     for name in sorted(STAGES):
         if name not in _IMPLEMENTED:
