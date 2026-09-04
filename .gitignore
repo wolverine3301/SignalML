@@ -34,3 +34,7 @@ uv.lock.tmp*
 Thumbs.db
 .vscode/
 .idea/
+
+# Machine-local config overrides (absolute tool paths differ per machine).
+# Copy configs/align.local.example.yaml -> configs/align.local.yaml and edit.
+/configs/*.local.yaml

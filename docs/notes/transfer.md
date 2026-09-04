@@ -87,8 +87,8 @@ indistinguishable from a bad path. This is not TLS and it is not for the open in
 Sender (the machine holding `DATA_ROOT`):
 
 ```powershell
-signalml ship plan --data-root Y:\SignalAI\DATA_ROOT --what rebuildable
-signalml ship serve --data-root Y:\SignalAI\DATA_ROOT --name full_acoustic_v1
+signalml ship plan --data-root Y:\DATA_ROOT --what rebuildable
+signalml ship serve --data-root Y:\DATA_ROOT --name full_acoustic_v1
 ```
 
 `serve` prints the exact `ship pull` line, including the LAN address and token.
