@@ -3,7 +3,7 @@
 #
 # Designed to run DETACHED (survives the Claude session / a logout):
 #   Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass',
-#     '-File','Y:\SignalAI\SignalML-main\scripts\onboard_full.ps1' -WindowStyle Hidden
+#     '-File','<repo>\scripts\onboard_full.ps1' -WindowStyle Hidden
 #
 # Every step logs to DATA_ROOT\logs\onboard_<timestamp>.log and a failed step does
 # not stop later independent steps (each stage is idempotent/resumable, so simply
@@ -13,13 +13,23 @@
 # command — a multi-day GPU run should be started by a human.
 
 param(
-    [string]$DataRoot = "Y:\SignalAI\DATA_ROOT",
+    [string]$DataRoot = $env:SIGNALML_DATA_ROOT,
     [string]$ImportPath = "RAW/Full"
 )
+
+if (-not $DataRoot) {
+    throw "No data root. Pass -DataRoot <path>, or persist one with " +
+          "scripts\bootstrap_rig.ps1 -SetDataRootEnv (sets SIGNALML_DATA_ROOT)."
+}
 
 $ErrorActionPreference = "Continue"
 $repo = Split-Path $PSScriptRoot -Parent
 $cli = Join-Path $repo ".venv\Scripts\signalml.exe"
+
+# Machine-local aligner config (gitignored: absolute conda path) when present, since a
+# detached process inherits a pre-Miniforge PATH; the stock config otherwise.
+$alignConfig = Join-Path $repo "configs\align.local.yaml"
+if (-not (Test-Path $alignConfig)) { $alignConfig = Join-Path $repo "configs\align.yaml" }
 $logDir = Join-Path $DataRoot "logs"
 New-Item -ItemType Directory -Force $logDir | Out-Null
 $log = Join-Path $logDir ("onboard_" + (Get-Date -Format "yyyyMMdd_HHmmss") + ".log")
@@ -47,7 +57,7 @@ Step "clean at PROD profile (force: everything moves to 44.1k)" {
 }
 
 Step "align (MFA, new songs only)" {
-    & $cli align --data-root $DataRoot --config (Join-Path $repo "configs\align.workpc.yaml")
+    & $cli align --data-root $DataRoot --config $alignConfig
 }
 
 Step "census report" {

@@ -1,0 +1,27 @@
+# Machine-local alignment override — copy to `align.local.yaml` and edit the path.
+#
+# `configs/align.local.yaml` is gitignored because `mfa_command` has to be absolute on
+# most machines: detached/unattended processes (e.g. scripts/onboard_full.ps1 launched
+# via Start-Process) inherit a pre-Miniforge PATH, so the bare `conda` that
+# configs/align.yaml uses is not resolvable there.
+#
+# A config file REPLACES the defaults rather than merging with align.yaml, so keep
+# every key below. scripts/onboard_full.ps1 picks this file up automatically when it
+# exists and falls back to configs/align.yaml when it does not.
+language: en
+phone_set: mfa_ipa/en_v1
+acoustic_model: english_mfa
+dictionary: english_mfa
+
+# Absolute path to the conda that owns the `aligner` env:
+#   Windows     C:\Users\<you>\miniforge3\Scripts\conda.exe
+#   Linux/WSL2  /home/<you>/miniforge3/bin/conda
+mfa_command: ["<conda-path>", "run", "-n", "aligner", "--no-capture-output", "mfa"]
+
+# Beams per the singing defaults in configs/align.yaml (sung vowels drift far enough
+# from the speech acoustic model that the stock beams under-align).
+beam: 200
+retry_beam: 1000
+
+num_jobs: 12   # roughly physical cores
+strict_phones: true

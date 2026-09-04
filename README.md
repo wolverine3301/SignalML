@@ -54,6 +54,11 @@ python -m uv run signalml score phoneset --dict "$env:USERPROFILE\Documents\MFA\
 `mfa_command` in `configs/align.yaml`), keeps the aligner-native TextGrid for audit,
 and converts to the pipeline-native `align/phones.json` (MFA IPA phone set, Q2).
 
+Detached runs inherit a pre-Miniforge `PATH`, so bare `conda` may not resolve. Copy
+`configs/align.local.example.yaml` to `configs/align.local.yaml` (gitignored) and put
+the absolute conda path in `mfa_command`; `scripts/onboard_full.ps1` uses that file
+when it exists and `configs/align.yaml` otherwise.
+
 If MFA won't install or aligns sung vowels poorly, the fallbacks are (in order):
 **SOFA** (PyTorch singing-oriented aligner — P5.4 runs a head-to-head eval) and an
 MFA-only WSL2 Ubuntu env sharing the data directory (ARCHITECTURE §2).
@@ -98,8 +103,8 @@ machine. Full design and gotchas: `docs/notes/transfer.md`.
 
 ```powershell
 # sender (holds DATA_ROOT) — plan a selection, then serve it
-signalml ship plan  --data-root Y:\SignalAI\DATA_ROOT --what rebuildable
-signalml ship serve --data-root Y:\SignalAI\DATA_ROOT --name full_acoustic_v1
+signalml ship plan  --data-root Y:\DATA_ROOT --what rebuildable
+signalml ship serve --data-root Y:\DATA_ROOT --name full_acoustic_v1
 
 # receiver (the rig) — `serve` prints this line with the real address and token
 signalml ship pull http://10.0.0.144:8770/<token> --data-root D:\DATA_ROOT --repo-dir D:\SignalML
