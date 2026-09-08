@@ -148,6 +148,22 @@ class TestBuild:
         assert "align_score 0.5" in reasons
         assert "clean profile 'prod'" in reasons and "re-run" in reasons
 
+    def test_min_singer_minutes_drops_thin_speakers(self, tmp_path, make_wav):
+        """The floor is measured on clip seconds and drops a speaker's songs together."""
+        root = tmp_path / "dr"
+        _ready_song(root, make_wav, singer="alice")
+        _ready_song(root, make_wav, singer="bob")
+        # PHONES yields two clips of ~0.75s and ~1.1s -> well under a minute each
+        summary = build(root, recipe=recipe(filters={
+            "min_align_score": 0.8, "min_singer_minutes": 1.0}))
+        assert not summary.songs_used
+        assert len(summary.skipped) == 2
+        reasons = " | ".join(summary.skipped.values())
+        assert "min_singer_minutes 1.0" in reasons and "min of clips" in reasons
+        # a zero floor is the default and keeps everyone
+        summary = build(root, recipe=recipe(), force=True)
+        assert len(summary.songs_used) == 2
+
     def test_refuses_existing_without_force(self, tmp_path, make_wav):
         root = tmp_path / "dr"
         _ready_song(root, make_wav)
