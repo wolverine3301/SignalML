@@ -52,6 +52,11 @@ class DatasetFilters(BaseModel):
     min_align_score: float = 0.8
     exclude_processing: list[str] = ["heavy"]
     singers: list[str] = []  # empty = all singers
+    # Drop a speaker whole when its *clipped* audio falls under this (0 = keep all).
+    # Measured after segmentation, never on manifest duration: raw vocals are ~44%
+    # silence and sub-minimum fragments, so a singer who reads as 5 minutes in the
+    # manifest can be under 3 in the dataset.
+    min_singer_minutes: float = 0.0
     ids: list[str] = []  # optional explicit whitelist (intersected with filters)
 
 
@@ -231,6 +236,66 @@ def _select(manifest: Manifest, recipe: DatasetRecipe, summary: BuildSummary,
     return selected
 
 
+def _cut_all(
+    selected: list[ManifestRecord], recipe: DatasetRecipe, summary: BuildSummary,
+    data_root: Path,
+) -> tuple[list[ManifestRecord], dict[str, tuple[list[Clip], int]]]:
+    """Segment every selected song up front, before a single wav is written.
+
+    Clip time is the only honest measure of how much a speaker actually brings, and
+    ``min_singer_minutes`` needs it before the write loop starts — otherwise a
+    below-floor speaker's clips would be written and then have to be deleted. Reading
+    the header (``sf.info``) instead of the samples keeps this pass cheap.
+    """
+    cut: dict[str, tuple[list[Clip], int]] = {}
+    kept: list[ManifestRecord] = []
+    for rec in selected:
+        sdir = song_dir(data_root, rec.id)
+        payload = json.loads(
+            (sdir / "align" / "phones.json").read_text(encoding="utf-8"))
+        info = sf.info(str(sdir / "clean" / "vocals.wav"))
+        clips, dropped = segment_phones(
+            payload["phones"], recipe.segmentation,
+            audio_len_sec=info.frames / info.samplerate)
+        if not clips:
+            summary.skipped[rec.id] = "no usable clips after segmentation"
+            continue
+        cut[rec.id] = (clips, dropped)
+        kept.append(rec)
+    return kept, cut
+
+
+def _drop_thin_singers(
+    selected: list[ManifestRecord], cut: dict[str, tuple[list[Clip], int]],
+    recipe: DatasetRecipe, summary: BuildSummary,
+) -> list[ManifestRecord]:
+    """Refuse speakers under ``min_singer_minutes``, all of their songs at once.
+
+    A speaker with a couple of minutes still trains the shared acoustic backbone, but
+    its embedding is noise-dominated — and for the voice bank (ARCHITECTURE §4) an
+    undertrained timbre that renders as the corpus average is worse than an absent
+    one, because the ECAPA novelty guard has nothing real to measure against.
+    """
+    floor = recipe.filters.min_singer_minutes
+    if floor <= 0:
+        return selected
+    minutes: dict[str, float] = {}
+    for rec in selected:
+        clips, _ = cut[rec.id]
+        minutes[rec.meta.singer] = minutes.get(rec.meta.singer, 0.0) + sum(
+            c.end - c.start for c in clips) / 60
+    kept = []
+    for rec in selected:
+        got = minutes[rec.meta.singer]
+        if got < floor:
+            summary.skipped[rec.id] = (
+                f"singer {rec.meta.singer!r} has {got:.1f} min of clips across the "
+                f"build < min_singer_minutes {floor}")
+        else:
+            kept.append(rec)
+    return kept
+
+
 def build(
     data_root: str | Path,
     *,
@@ -260,6 +325,11 @@ def build(
     if not selected:
         return summary
 
+    selected, cut = _cut_all(selected, recipe, summary, data_root)
+    selected = _drop_thin_singers(selected, cut, recipe, summary)
+    if not selected:
+        return summary
+
     singers = sorted({rec.meta.singer for rec in selected})
     spk_ids = {s: i for i, s in enumerate(singers)}
     phones_used: set[str] = set()
@@ -276,16 +346,9 @@ def build(
 
     for rec in selected:
         sdir = song_dir(data_root, rec.id)
-        payload = json.loads(
-            (sdir / "align" / "phones.json").read_text(encoding="utf-8"))
         audio, sr = sf.read(str(sdir / "clean" / "vocals.wav"), dtype="float32")
-        audio_len = len(audio) / sr
-        clips, dropped = segment_phones(
-            payload["phones"], recipe.segmentation, audio_len_sec=audio_len)
+        clips, dropped = cut[rec.id]
         summary.dropped_clips += dropped
-        if not clips:
-            summary.skipped[rec.id] = "no usable clips after segmentation"
-            continue
 
         folder = f"{_sanitize(rec.meta.singer)}-{rec.meta.language}"
         wavs_dir = out_dir / folder / "wavs"

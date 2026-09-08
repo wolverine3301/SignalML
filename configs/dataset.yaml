@@ -14,6 +14,9 @@ filters:
   corpora: []                   # empty = every corpus; e.g. [vocalset, gtsinger]
   exclude_corpora: []           # e.g. [medleydb] to keep a corpus out of this run
   singers: []                   # empty = all
+  # Speakers under this many minutes of CLIPPED audio are dropped whole (0 = keep
+  # all). Clip time runs ~56% of raw duration, so 5 raw minutes is under 3 here.
+  min_singer_minutes: 0.0
   ids: []                       # optional explicit whitelist
 
 segmentation:
