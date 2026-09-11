@@ -345,6 +345,55 @@ def _cmd_score_from_midi(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_score_segments(args: argparse.Namespace) -> int:
+    import json as _json
+
+    from .score import load_score, split_segments
+
+    score = load_score(args.score)
+    segments = split_segments(score, min_rest_sec=args.min_rest)
+
+    if args.compare:
+        from .score import plan_rerender
+
+        plan = plan_rerender(score, load_score(args.compare), min_rest_sec=args.min_rest)
+        print(f"{args.score} -> {args.compare}: {plan.summary()}")
+        for idx in plan.render:
+            print(f"  RENDER  segment {idx}: {segments[idx].text[:60]}")
+        return 0
+
+    if args.json:
+        print(_json.dumps([s.model_dump() for s in segments], indent=2,
+                          ensure_ascii=False))
+        return 0
+
+    print(f"{args.score}: {len(segments)} segments "
+          f"(min rest {args.min_rest}s, {len(score.notes)} notes)")
+    for seg in segments:
+        print(f"  [{seg.index:3d}] {seg.start:7.3f}-{seg.end:7.3f}s "
+              f"({seg.duration:5.2f}s, {len(seg.notes):2d} notes) "
+              f"{seg.content_hash[:12]}  {seg.text[:48]}")
+    return 0
+
+
+def _cmd_score_upgrade(args: argparse.Namespace) -> int:
+    import json as _json
+    from pathlib import Path
+
+    from .score import SCORE_FORMAT, load_score, save_score
+
+    for path in args.score:
+        before = _json.loads(Path(path).read_text(encoding="utf-8")).get("format")
+        score = load_score(path)  # upgrades in memory
+        if before == SCORE_FORMAT and not args.force:
+            print(f"ok {path} (already {SCORE_FORMAT})")
+            continue
+        save_score(score, path)
+        print(f"upgraded {path}: {before} -> {SCORE_FORMAT} "
+              f"({len(score.notes)} notes, ids minted)")
+    return 0
+
+
 def _cmd_score_phoneset(args: argparse.Namespace) -> int:
     from .score.phoneset import diff_against_mfa_dictionary, get_phone_set
 
@@ -548,6 +597,8 @@ def _stub(name: str, phase: str, desc: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .score.segment import DEFAULT_MIN_REST_SEC
+
     # IPA phones must survive Windows' legacy cp1252 console (score/phoneset output)
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -758,6 +809,24 @@ def main(argv: list[str] | None = None) -> int:
     from_midi_p.add_argument("--track", type=int, default=None,
                              help="melody track index (default: first with notes)")
     from_midi_p.set_defaults(func=_cmd_score_from_midi)
+    segments_p = score_sub.add_parser(
+        "segments", help="split a score into phrase segments (the render/edit unit, D12)"
+    )
+    segments_p.add_argument("score", help="score.json path")
+    segments_p.add_argument("--min-rest", type=float, default=DEFAULT_MIN_REST_SEC,
+                            help=f"rest length that opens a new phrase "
+                                 f"(default: {DEFAULT_MIN_REST_SEC}s)")
+    segments_p.add_argument("--json", action="store_true", help="emit segments as JSON")
+    segments_p.add_argument("--compare", default=None, metavar="EDITED.json",
+                            help="an edited score: report what would need re-rendering")
+    segments_p.set_defaults(func=_cmd_score_segments)
+    upgrade_p = score_sub.add_parser(
+        "upgrade", help="rewrite score.json at the current format (mints note ids)"
+    )
+    upgrade_p.add_argument("score", nargs="+", help="score.json path(s), edited in place")
+    upgrade_p.add_argument("--force", action="store_true",
+                           help="rewrite even if already at the current format")
+    upgrade_p.set_defaults(func=_cmd_score_upgrade)
     phoneset_p = score_sub.add_parser(
         "phoneset", help="show a phone set / diff it against an MFA dictionary"
     )
