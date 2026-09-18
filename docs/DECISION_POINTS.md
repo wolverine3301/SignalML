@@ -273,9 +273,33 @@ seeds, open-from-render-history, send-back into `sing --mix`. Explicitly out
 of scope forever: VST hosting, MIDI editing, recording. Phase E — model-
 independent, interleaves any time after phase A.
 
-**Delegable once decided:** the whole implementation — server, frontend, tray
-state, render cache/queue, editor EDL + DSP ops — against STUDIO.md as the
-contract.
+**UI layer designed 2026-09-17 (`docs/STUDIO_UI.md`):** shell (top bar with the
+always-visible audio-profile badge, 64px rail, single-audio-context transport,
+server-side queue widget), tokens inherited from `signalml/dash`, the four
+cross-cutting patterns (price-before-commit, CLI mirror, variance-track-as-
+loading-state, guard chip), per-screen layout and states, keyboard map, and the
+`signalml/studio/` HTTP+WS surface. Neither fork above is closed by it.
+
+**Partly built 2026-09-18 — the model-free half (`signalml/studio/`).** Everything
+that needs no renderer now exists and is under contract test: `GET /api/context`
+(rig, DATA_ROOT, checkpoint, audio profile), `/api/scores` (manifest-driven),
+`/api/voices` (bank + staleness), **`/api/segments/plan`** — the cost bar, which
+prices an edit by diffing segment hashes and probing the render cache — and
+`GET`/`PUT /api/render/{key}/variance`, the repair path's data layer (an edited curve
+mints a *new* key, so the original take survives and A/B is just playing two keys).
+CLI: `signalml studio serve | plan | variance`. Two supporting changes: `RenderRecord`
+gained `elapsed_sec`/`audio_sec` (measurements, outside the cache key) so the estimate
+calibrates from this rig instead of guessing, and `synth.iter_records` walks the cache.
+
+Transport is stdlib `http.server`, not FastAPI — **fork 1 is not closed by this**.
+FastAPI earns its place when the job queue needs a WebSocket, which arrives with the
+renderer in P8; the logic is pure functions in `studio/api.py`, so the swap is a file.
+No frontend was written, deliberately, for the same reason. `GET /api/queue` returns
+501 rather than an always-empty list.
+
+**Delegable once decided:** the rest of the implementation — frontend, tray
+state, render queue, editor EDL + DSP ops — against STUDIO.md as the
+scope contract and STUDIO_UI.md as the presentation contract.
 
 ---
 

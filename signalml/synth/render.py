@@ -28,11 +28,14 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from ..hashing import sha256_json
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 RENDER_RECORD_FORMAT = "signalml-render/0.1"
 VARIANCE_FORMAT = "signalml-variance/0.1"
@@ -153,6 +156,12 @@ class RenderRecord(BaseModel):
     # published name -> filename inside the render dir, e.g. {"audio": "audio.wav"}
     artifacts: dict[str, str] = Field(default_factory=dict)
     notes: str = ""
+    # Measurements, not inputs: deliberately outside ``cache_key`` (they do not change
+    # the audio), so adding them invalidates nothing. Their reason to exist is the
+    # Studio's cost bar (docs/STUDIO_UI.md §3.1): with elapsed *and* audio seconds on
+    # past renders, "3 phrases, ≈48 s" is measured from this machine instead of guessed.
+    elapsed_sec: float | None = Field(default=None, ge=0)
+    audio_sec: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _check_key(self) -> RenderRecord:
@@ -174,6 +183,8 @@ def new_record(
     note_ids: list[str] | None = None,
     artifacts: dict[str, str] | None = None,
     notes: str = "",
+    elapsed_sec: float | None = None,
+    audio_sec: float | None = None,
 ) -> RenderRecord:
     """Build a record for ``inputs``, stamping the key and creation time."""
     return RenderRecord(
@@ -185,7 +196,26 @@ def new_record(
         note_ids=list(note_ids or []),
         artifacts=dict(artifacts or {}),
         notes=notes,
+        elapsed_sec=elapsed_sec,
+        audio_sec=audio_sec,
     )
+
+
+def iter_records(data_root: str | Path) -> "Iterator[RenderRecord]":
+    """Every cached render record under ``data_root``, skipping unreadable ones.
+
+    A malformed or hand-edited record is skipped rather than raised on: callers are
+    reporting over the cache (the Studio's estimate), and one bad directory should not
+    take down a listing. ``load_record`` stays strict for the single-record path.
+    """
+    root = renders_root(data_root)
+    if not root.is_dir():
+        return
+    for path in sorted(root.glob(f"*/{RECORD_FILENAME}")):
+        try:
+            yield load_record(path)
+        except (OSError, json.JSONDecodeError, ValidationError):
+            continue
 
 
 def renders_root(data_root: str | Path) -> Path:

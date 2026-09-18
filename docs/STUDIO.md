@@ -4,6 +4,11 @@
 > a shell over S8; it renders nothing P8's CLI can't already render. Decision-point
 > entry: DECISION_POINTS.md D11. Wave-3 (D10) extends this tool; it does not
 > replace it.
+>
+> **This doc decides what the screens do and why.** `STUDIO_UI.md` (2026-09-17)
+> decides what they look like and how they behave — shell, layout, component
+> anatomy, states, keyboard, and the server API surface — with a visual reference
+> of all five artboards.
 
 ## 1. What it is
 
