@@ -356,10 +356,15 @@ def _cmd_score_segments(args: argparse.Namespace) -> int:
     if args.compare:
         from .score import plan_rerender
 
-        plan = plan_rerender(score, load_score(args.compare), min_rest_sec=args.min_rest)
+        edited = load_score(args.compare)
+        plan = plan_rerender(score, edited, min_rest_sec=args.min_rest)
+        # plan.render indexes the EDITED score's segments, not this file's: a segment
+        # only needs rendering because it is new, so it may not exist in `segments` at
+        # all (IndexError) or, worse, name a different phrase at the same position.
+        edited_segments = split_segments(edited, min_rest_sec=args.min_rest)
         print(f"{args.score} -> {args.compare}: {plan.summary()}")
         for idx in plan.render:
-            print(f"  RENDER  segment {idx}: {segments[idx].text[:60]}")
+            print(f"  RENDER  segment {idx}: {edited_segments[idx].text[:60]}")
         return 0
 
     if args.json:

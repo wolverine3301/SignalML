@@ -518,3 +518,27 @@ class TestScoreSegmentsCLI:
         out = capsys.readouterr().out
         assert "1/2 segments reused" in out
         assert "RENDER  segment 1" in out
+        # The phrase named must be the EDITED one. Printing "bright star" here would
+        # be reporting the old lyric as the thing about to be rendered.
+        assert "bright moon" in out and "bright star" not in out
+
+    def test_compare_against_a_longer_score(self, tmp_path, capsys):
+        """plan.render indexes the edited score, which may be longer than this one.
+
+        Regression: the indices were used against the *old* score's segment list, so
+        appending a phrase raised IndexError instead of pricing the edit.
+        """
+        old = two_phrase_score()
+        new = score_of(
+            *old.notes,
+            note(3.0, 3.5, midi=74, syllable="and"),
+            note(3.5, 4.0, midi=76, syllable="burn"),
+        ).ensure_ids()
+        old_path = self._write(tmp_path, old, "old.json")
+        new_path = self._write(tmp_path, new, "new.json")
+        assert cli_main(
+            ["score", "segments", str(old_path), "--compare", str(new_path)]
+        ) == 0
+        out = capsys.readouterr().out
+        assert "2/3 segments reused" in out
+        assert "RENDER  segment 2: and burn" in out
