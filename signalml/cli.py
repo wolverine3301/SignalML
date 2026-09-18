@@ -437,6 +437,96 @@ def _cmd_dataset_build(args: argparse.Namespace) -> int:
     return 0 if summary.clips else 1
 
 
+def _cmd_studio_serve(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .studio.server import serve
+
+    serve(resolve_data_root(args.data_root), host=args.host, port=args.port,
+          profile_name=args.profile, open_browser=args.open)
+    return 0
+
+
+_PLAN_MARK = {"clean": "cached", "dirty": "RENDER", "unknown": "?"}
+
+
+def _cmd_studio_plan(args: argparse.Namespace) -> int:
+    import json as _json
+
+    from .manifest import resolve_data_root
+    from .studio import build_render_plan
+
+    try:
+        plan = build_render_plan(
+            resolve_data_root(args.data_root),
+            args.score,
+            compare=args.compare,
+            voice=args.voice,
+            seed=args.seed,
+            profile_name=args.profile,
+            min_rest_sec=args.min_rest,
+        )
+    except FileNotFoundError as exc:
+        print(f"studio plan: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(_json.dumps(plan.model_dump(), indent=2, ensure_ascii=False))
+        return 0
+
+    head = plan.score_path
+    if plan.compare_path:
+        head += f" -> {plan.compare_path}"
+    print(f"{head}  [{plan.audio_profile}, seed {plan.seed}, "
+          f"voice {plan.voice or '(none)'}]")
+    print(f"  {plan.summary()}")
+    for row in plan.segments:
+        origin = "" if row.reused_from is None else f"  <- old {row.reused_from}"
+        print(f"  [{row.index:3d}] {row.start:7.3f}-{row.end:7.3f}s "
+              f"{_PLAN_MARK[row.state]:>6}  {row.content_hash[:12]}  "
+              f"{row.text[:44]}{origin}")
+    if plan.dropped:
+        print(f"  dropped from the old score: {plan.dropped}")
+    if not plan.estimate.calibrated:
+        print("  estimate: no timed renders yet — duration unknown until P8 "
+              "records elapsed_sec")
+    for note in plan.notes:
+        print(f"  note: {note}")
+    return 0
+
+
+def _cmd_studio_variance(args: argparse.Namespace) -> int:
+    import json as _json
+    from pathlib import Path
+
+    from .manifest import resolve_data_root
+    from .studio import read_variance, write_variance
+    from .synth import VarianceTrack
+
+    data_root = resolve_data_root(args.data_root)
+    if args.apply:
+        try:
+            track = VarianceTrack.model_validate(
+                _json.loads(Path(args.apply).read_text(encoding="utf-8")))
+            written = write_variance(data_root, args.key, track, notes=args.note)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"studio variance: {exc}", file=sys.stderr)
+            return 1
+        if not written.changed:
+            print(f"{args.key[:16]}: curve is unchanged — no new render minted")
+            return 0
+        print(f"{args.key[:16]} -> {written.key[:16]}  "
+              f"(variance {written.variance_sha256[:12]}, origin {track.origin})")
+        print("  the original render is untouched; A/B is just playing both keys")
+        return 0
+
+    try:
+        track = read_variance(data_root, args.key)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"studio variance: {exc}", file=sys.stderr)
+        return 1
+    print(_json.dumps(track.model_dump(), indent=2, ensure_ascii=False))
+    return 0
+
+
 def _cmd_dash(args: argparse.Namespace) -> int:
     from .dash.server import serve
     from .manifest import resolve_data_root
@@ -865,6 +955,46 @@ def main(argv: list[str] | None = None) -> int:
     dash_p.set_defaults(func=_cmd_dash)
 
     # ship — LAN transfer of a corpus selection + the code that produced it
+    # studio (post-P8 UI; the model-free half is usable now - docs/STUDIO_UI.md)
+    studio_p = subparsers.add_parser(
+        "studio", help="voice/performance front-end: API server + render costing")
+    studio_sub = studio_p.add_subparsers(dest="command", required=True)
+
+    st_serve = studio_sub.add_parser("serve", help="run the Studio API server")
+    st_serve.add_argument("--data-root", default=None,
+                          help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    st_serve.add_argument("--host", default="127.0.0.1",
+                          help="bind address (0.0.0.0 to reach it from the laptop)")
+    st_serve.add_argument("--port", type=int, default=8770)
+    st_serve.add_argument("--profile", default=None,
+                          help="audio profile (default: $SIGNALML_AUDIO_PROFILE or YAML)")
+    st_serve.add_argument("--open", action="store_true", help="open a browser")
+    st_serve.set_defaults(func=_cmd_studio_serve)
+
+    st_plan = studio_sub.add_parser(
+        "plan", help="price a render before committing to it (the Studio's cost bar)")
+    st_plan.add_argument("score", help="score.json to render")
+    st_plan.add_argument("--compare", default=None,
+                         help="edited score.json: also report which phrases survive")
+    st_plan.add_argument("--voice", default=None,
+                         help="voice name; without it, cache state is unknown")
+    st_plan.add_argument("--seed", type=int, default=0)
+    st_plan.add_argument("--profile", default=None, help="audio profile")
+    st_plan.add_argument("--min-rest", type=float, default=DEFAULT_MIN_REST_SEC,
+                         help="phrase-split rest threshold in seconds")
+    st_plan.add_argument("--data-root", default=None)
+    st_plan.add_argument("--json", action="store_true", help="emit the plan as JSON")
+    st_plan.set_defaults(func=_cmd_studio_plan)
+
+    st_var = studio_sub.add_parser(
+        "variance", help="show or replace a cached render's F0/duration track")
+    st_var.add_argument("key", help="render cache key")
+    st_var.add_argument("--apply", default=None,
+                        help="edited variance JSON to persist as a NEW render")
+    st_var.add_argument("--note", default="", help="why it was edited")
+    st_var.add_argument("--data-root", default=None)
+    st_var.set_defaults(func=_cmd_studio_variance)
+
     ship_p = subparsers.add_parser(
         "ship", help="transfer a corpus selection + this repo to the training rig")
     ship_sub = ship_p.add_subparsers(dest="command", required=True)
