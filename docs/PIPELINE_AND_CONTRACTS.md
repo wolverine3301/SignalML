@@ -54,6 +54,7 @@ SignalML/
 │   │   └── dataset.py        # S6b: binarize training data
 │   ├── score/                # score JSON: schema, MIDI/MusicXML importers, G2P
 │   │   ├── schema.py
+│   │   ├── segment.py        # phrase segmentation + content hashing (D12)
 │   │   ├── from_midi.py
 │   │   ├── from_musicxml.py
 │   │   └── g2p.py
@@ -91,7 +92,8 @@ DATA_ROOT/
 │   ├── score.json            # when a score exists for this song (§4)
 │   └── analysis.json         # BPM, key, loudness stats, chunk map
 ├── datasets/<dataset_name>/  # binarized training sets (S6b output)
-├── voices/<voice_name>/      # voice bank (§5)
+├── voices/<voice_name>/      # voice bank (§6)
+├── renders/<key>/            # content-addressed segment renders + provenance (§5)
 └── checkpoints/<run_name>/   # training outputs + config snapshot + git hash
 ```
 
@@ -208,10 +210,10 @@ Per song; array of note events bound to syllables and phonemes:
 
 ```json
 {
-  "format": "signalml-score/0.1",
+  "format": "signalml-score/0.2",
   "bpm": 96, "key": "G:major", "language": "en", "phone_set": "mfa_ipa/en_v1",
   "notes": [
-    {"start": 4.125, "end": 4.875, "midi": 67,
+    {"id": "n0001", "start": 4.125, "end": 4.875, "midi": 67,
      "syllable": "shine", "phonemes": ["ʃ", "aɪ", "n"], "stress": 1,
      "slur": false}
   ]
@@ -224,8 +226,66 @@ Per song; array of note events bound to syllables and phonemes:
   (it's small JSON). TextGrid is *not* a score — it appears only as the S5 intermediate.
 - Deliberately close to DiffSinger `.ds` so a mechanical converter to the trainer's
   format is trivial and community editors remain usable.
+- **`id` (0.2, D12)** — a stable per-note handle, so a region of a score can be *named*.
+  Minted on import/load as `nNNNN`; hand-written ids are fine. **Editors mint new ids,
+  never renumber existing ones** — every saved reference (render provenance, edit lists)
+  would silently retarget otherwise. Ids are handles, not content: they take no part in
+  the segment content hash, so renaming them never costs a re-render. `0.1` files load
+  and upgrade in memory; `signalml score upgrade` persists it.
 
-## 5. Voice profile (`voices/<name>/`)
+### 4b. Segments — the render and edit unit **[D12]**
+
+A **segment** is a phrase: a maximal run of notes with no rest of at least
+`min_rest_sec` (default 0.30 s) between them, and a slur continuation can never open
+one (it carries no phonemes of its own). This is the unit DiffSinger renders natively,
+and rests are where a splice is inaudible — so it is both the render unit and the edit
+unit. Derived, never stored: `signalml.score.segment.split_segments(score)`.
+
+Each segment carries a **content hash** covering exactly what changes its audio:
+
+| In the hash | Out of the hash | Why |
+|---|---|---|
+| pitch, syllable, phonemes, stress, slur | note `id`s | ids are handles; renumbering must be free |
+| note times **relative to segment start** | absolute position in the song | moving a phrase later reuses its render |
+| `language`, `phone_set` | `bpm`, `key` | those change pronunciation; these are header metadata |
+
+Consequences: identical phrases share one cache entry (a repeated chorus line renders
+once), and editing one word invalidates one phrase. `plan_rerender(old, new)` diffs two
+versions of a score by content — not by position, so inserting a line at the top does
+not invalidate everything after it — and reports what must be re-rendered.
+`signalml score segments SCORE --compare EDITED` prices an edit before anything renders.
+
+## 5. Render records (`renders/<key>/`) **[D12]**
+
+A render is a pure function of its inputs, so it is addressed by a hash of them.
+`signalml.synth.render` owns this and contains **no model code** — P8's renderer fills
+in the audio.
+
+```
+DATA_ROOT/renders/<key[:16]>/
+├── record.json     # {"key", "inputs": {...}, "created", "score_id",
+│                   #  "segment_index", "note_ids", "artifacts", "notes"}
+├── variance.json   # F0 curve + phoneme durations — the editable intermediate
+├── mel.npy         # optional, when the mel is kept for mel-domain splicing
+└── audio.wav
+```
+
+- **Cache key inputs:** `segment_hash`, `voice`, `embedding_sha256`,
+  `checkpoint_sha256`, **`audio_profile`** (Q11 — a `dev` render must never answer a
+  `prod` request), `seed`, `config_sha256`, and `variance_sha256`. Anything that changes
+  the audio must be in the key, or stale audio is served silently; adding a field means
+  bumping `RENDER_KEY_VERSION`.
+- **Existence is the cache.** The directory is named by a key *prefix* for readability;
+  the full key lives in the record and is checked on load, so a prefix collision is
+  detected rather than served.
+- **`variance.json` is an artifact, not a temporary.** `variance_sha256` is `null` when
+  the variance models predicted it (deterministic given the other inputs) and set when a
+  hand-edited or imported track overrides them — so a repaired phrase ("the vowel on
+  *shine* goes flat") caches like any other render instead of colliding with the
+  predicted one. Plain JSON on purpose, same reasoning as the score: a five-second
+  phrase is a few hundred floats, small enough to read and hand-fix.
+
+## 6. Voice profile (`voices/<name>/`)
 
 ```
 voices/aurora/
@@ -241,7 +301,7 @@ voices/aurora/
 The checkpoint pin + `ref/` phrases are what make voices survive model retraining
 (re-projection procedure: Migration P7).
 
-## 6. Conventions
+## 7. Conventions
 
 - **Audio:** mono float32 WAV at the **active profile's** sample rate at every
   inter-stage boundary (Q11: `dev` = 22.05 kHz for fast pipeline testing, `prod` =

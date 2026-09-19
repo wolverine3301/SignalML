@@ -29,11 +29,25 @@ The `train` extra installs Demucs + CPU torch wheels (PyPI default on Windows). 
 
 ```powershell
 python -m uv sync --extra train
-python -m uv pip install --upgrade torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+python -m uv pip install --python .venv/Scripts/python.exe --reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu128
 ```
 
 Then `signalml separate` picks the GPU automatically (`device: auto` in
 `configs/separate.yaml`). Requires a current NVIDIA driver (570+).
+
+Both flags are load-bearing, and both failure modes are silent:
+
+- **`--python`** — without an activated venv, `uv pip install` resolves to the
+  *system* interpreter, so the CUDA wheels land somewhere the project never imports.
+- **`--reinstall`** — `--upgrade` alone treats an equal-or-newer CPU wheel as already
+  satisfying the requirement and does nothing.
+
+**A plain `python -m uv sync` undoes this.** `train` is an optional extra, so a bare
+sync removes torch/torchaudio/torchcrepe/demucs from the venv entirely; re-syncing
+with `--extra train` then pulls CPU wheels from PyPI. The dev loop in `CLAUDE.md` uses
+plain `uv sync`, so after running it on a GPU box, check
+`python -m uv run python -c "import torch; print(torch.cuda.is_available())"` and
+redo the swap above if it prints `False`.
 
 ## Alignment (MFA) install
 

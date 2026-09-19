@@ -193,7 +193,7 @@ old parser deleted.
 
 ## Phase 6 — Score format + importers ✅ DONE 2026-07-12
 
-> Completed: `score/schema.py` (pydantic `signalml-score/0.1`; slur convention =
+> Completed: `score/schema.py` (pydantic `signalml-score/0.2` since D12; slur convention =
 > continuation notes carry same syllable + empty phonemes; validators for overlap/
 > sort/slur/key), `score/g2p.py` (backend abstraction: LexiconG2P → MfaG2P
 > (`mfa g2p`, preferred, batch + cache, injectable runner) → EspeakG2P (phonemizer,
@@ -203,7 +203,7 @@ old parser deleted.
 > `from_musicxml.py` stub with implementer notes, CLI `signalml score
 > validate|from-midi|phoneset`, golden MIDI→score test + 40 new tests overall.
 
-1. Implement `score/schema.py` (pydantic, `signalml-score/0.1` per contracts §4) +
+1. Implement `score/schema.py` (pydantic, `signalml-score/0.2` per contracts §4) +
    validation CLI `signalml score validate`.
 2. Implement `from_midi.py`: monophonic melody track + lyrics list → score JSON
    (syllable-to-note by order; melisma → `slur` continuation). Document limitations.

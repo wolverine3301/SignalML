@@ -1,7 +1,7 @@
 """MIDI + lyrics -> score JSON (docs/MIGRATION_PLAN.md P6.2).
 
 Lowers a monophonic melody track plus syllable-tokenized lyrics into
-``signalml-score/0.1``. Syllable-to-note binding is **by order**, so the lyrics must be
+``signalml-score/0.2``. Syllable-to-note binding is **by order**, so the lyrics must be
 pre-syllabified by the writer:
 
 - whitespace separates tokens; each token binds to the next note
@@ -203,4 +203,4 @@ def score_from_midi(
         ))
 
     return Score(format=SCORE_FORMAT, bpm=bpm, key=key, language=language,
-                 phone_set=phone_set, notes=events)
+                 phone_set=phone_set, notes=events).ensure_ids()

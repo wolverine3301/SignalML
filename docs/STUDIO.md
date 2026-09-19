@@ -4,6 +4,11 @@
 > a shell over S8; it renders nothing P8's CLI can't already render. Decision-point
 > entry: DECISION_POINTS.md D11. Wave-3 (D10) extends this tool; it does not
 > replace it.
+>
+> **This doc decides what the screens do and why.** `STUDIO_UI.md` (2026-09-17)
+> decides what they look like and how they behave — shell, layout, component
+> anatomy, states, keyboard, and the server API surface — with a visual reference
+> of all five artboards.
 
 ## 1. What it is
 
@@ -60,7 +65,7 @@ per-dimension sliders are meaningless; expose derived controls only:
 Sliders can steer *onto* a training singer, so the ECAPA similarity guard is not
 just a save-time gate: every rendered candidate shows its **nearest-training-
 singer cosine as a live green/amber/red readout** (threshold from the profile
-schema, PIPELINE_AND_CONTRACTS.md §5).
+schema, PIPELINE_AND_CONTRACTS.md §6).
 
 ### Demo phrases
 
@@ -75,8 +80,10 @@ Constraints:
 - Short by design: seconds-long phrases keep the render loop interactive on the
   5090 and become the `ref/` phrases when a candidate is saved.
 
-Every render is cached keyed on `(embedding_hash, score_id, checkpoint_hash,
-seed)`; the tray never re-renders on replay or re-sort.
+Every render is cached keyed on the segment content hash, embedding, checkpoint,
+audio profile, seed and config (the real key is
+`synth.render.RenderInputs`, PIPELINE_AND_CONTRACTS.md §5); the tray never
+re-renders on replay or re-sort.
 
 ### Candidate tray (the compare loop)
 
@@ -107,7 +114,7 @@ provenance in `profile.json` notes. Unsaved candidates die with their session.
 ### Voice picker
 
 Gallery of saved voices; clicking plays `ref/` phrases (already defined as the
-"this is what aurora sounds like" demo, PIPELINE_AND_CONTRACTS.md §5). Each card
+"this is what aurora sounds like" demo, PIPELINE_AND_CONTRACTS.md §6). Each card
 shows the checkpoint pin and a **stale badge** when the active checkpoint has
 moved, with a *reproject* action that runs Migration P7's re-projection and
 presents before/after ref-phrase A/B for acceptance.
@@ -211,10 +218,46 @@ is what keeps this screen small.
 - **C:** Performance screen — score picker and MIDI import first; retexting
   when D4's lyric-fitting pass exists.
 - **D:** rides D10 — speech/acting domains, emotional-notes track editing
-  (`signalml-score/0.2` prosody events).
+  (`signalml-score/0.3` prosody events).
 - **E:** Editor screen — tier 1 + take comping first; tiers 2–3 as needs
   appear. Model-independent and CPU-only, so E can interleave any time after A
   (comping and open-from-history only become meaningful once renders exist).
+- **F:** Targeted editing (§8) — needs A (renders exist) and benefits from E
+  (the timeline is where regions live). Method gated on D12's ear tests.
 
-Nothing here blocks or changes P7. The only pre-commitment is §1's API-first
-shape for P8.
+Nothing here blocks or changes P7. The pre-commitments are §1's API-first shape
+for P8 and §8's segment-shaped render unit.
+
+## 8. Screen 2½ — targeted editing (D12; added 2026-09-11)
+
+Not a fifth screen: the convergence of §4 (Performance) and §6 (Editor). The
+timeline holds two kinds of region —
+
+- **live** — backed by a score segment, re-renderable, carries its render
+  provenance
+- **frozen** — plain audio, hand-edited, no longer regenerable
+
+— with **freeze / unfreeze** as the verb, the metaphor every DAW user already
+has. "This line is bad" = select a live region, then reroll it, nudge its F0
+curve, or comp it against sibling takes.
+
+**Already built (pre-P8, model-free):** `score/segment.py` splits a score into
+phrase segments and content-hashes them; `plan_rerender` diffs two versions of a
+score and reports exactly which phrases need re-rendering. `synth/render.py`
+holds the cache key, the per-segment provenance record, and the persisted
+variance track (F0 + durations) that makes *repair* — as opposed to rerolling
+the seed and losing the take — possible at all. Visible today as
+`signalml score segments SCORE --compare EDITED`, which prices an edit before
+anything renders.
+
+**UI rules when this is built:**
+
+- Region boundaries **snap to phrase rests**, never mid-vowel — the segmenter
+  already only cuts there, and rests are where a splice is inaudible.
+- Show the edit's cost before committing: "3 of 14 phrases re-render."
+- Reroll is not the only verb. A UI whose sole answer to a complaint is
+  "regenerate" trains users to reroll thirty times chasing one detail; the F0
+  curve and (if D12's E-gates bless it) the vary-strength slider are what stop
+  that.
+- Effects are re-applied wholesale after a vocal fix (D12) — the EDL makes this
+  cheap, and it is why no incremental-effects machinery is needed.
