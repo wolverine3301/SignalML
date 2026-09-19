@@ -299,6 +299,42 @@ def _cmd_align(args: argparse.Namespace) -> int:
     return 0 if not summary.failed else 1
 
 
+def _cmd_eval_align(args: argparse.Namespace) -> int:
+    from .evaluation.runner import collect_align_scores, load_song_map, run_jamendolyrics
+    from .manifest import resolve_data_root
+
+    data_root = resolve_data_root(args.data_root)
+    report = run_jamendolyrics(
+        args.ref_root,
+        data_root,
+        language=args.language,
+        song_map=load_song_map(args.map) if args.map else None,
+        aligner=args.aligner,
+        align_scores=None if args.no_calibrate else collect_align_scores(data_root),
+    )
+    for line in report.summary_lines():
+        print(line)
+    if args.out:
+        print(f"wrote {report.write(args.out)}")
+    return 0 if report.n_scored else 1
+
+
+def _cmd_eval_drift(args: argparse.Namespace) -> int:
+    import json as _json
+    from pathlib import Path
+
+    from .evaluation.alignment import drift
+    from .evaluation.runner import load_phones
+
+    metrics = drift(load_phones(args.reference), load_phones(args.test))
+    print(f"drift (reference -> test): {metrics.summary()}")
+    if args.out:
+        Path(args.out).write_text(_json.dumps(metrics.to_dict(), indent=2) + "\n",
+                                  encoding="utf-8")
+        print(f"wrote {args.out}")
+    return 0
+
+
 def _cmd_score_validate(args: argparse.Namespace) -> int:
     from .score import validate_score_file
 
@@ -879,6 +915,34 @@ def main(argv: list[str] | None = None) -> int:
     align_p.add_argument("--force", action="store_true", help="re-align finished songs")
     align_p.add_argument("--limit", type=int, default=None, help="max songs this run")
     align_p.set_defaults(func=_cmd_align)
+
+    # eval (P5.4 aligner comparison — docs/notes/aligner_eval.md)
+    eval_p = subparsers.add_parser("eval", help="[P5] measure alignment against ground truth")
+    eval_sub = eval_p.add_subparsers(dest="command", required=True)
+    ea_p = eval_sub.add_parser(
+        "align", help="score alignments against a reference set (word onsets)"
+    )
+    ea_p.add_argument("--ref-root", required=True,
+                      help="JamendoLyrics checkout root (contains JamendoLyrics.csv)")
+    ea_p.add_argument("--data-root", default=None,
+                      help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    ea_p.add_argument("--language", default="English",
+                      help="reference-set language to score ('' for all; default: English)")
+    ea_p.add_argument("--map", default=None,
+                      help="CSV 'ref,song_id' if reference names differ from manifest ids")
+    ea_p.add_argument("--aligner", default="mfa",
+                      help="label recorded in the report (mfa/sofa/...)")
+    ea_p.add_argument("--no-calibrate", action="store_true",
+                      help="skip the quality.align_score correlation")
+    ea_p.add_argument("--out", default=None, help="write the JSON report here")
+    ea_p.set_defaults(func=_cmd_eval_align)
+    ed_p = eval_sub.add_parser(
+        "drift", help="separation-drift ablation between two phones.json"
+    )
+    ed_p.add_argument("reference", help="phones.json from the cleaner audio (e.g. isolated stem)")
+    ed_p.add_argument("test", help="phones.json from the separated vocal")
+    ed_p.add_argument("--out", default=None, help="write the JSON metrics here")
+    ed_p.set_defaults(func=_cmd_eval_drift)
 
     # score
     score_p = subparsers.add_parser("score", help="[P6] score JSON tools")
