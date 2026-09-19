@@ -166,8 +166,13 @@ Mechanism (three layers, from data to artifact):
    hopes — embeddings occupy a tighter, better-interpolable region.
 2. **Model the space.** After training, fit a light density model over the N embeddings —
    start with a full-covariance Gaussian (or a small GMM if N is large enough); a
-   normalizing flow is the upgrade if samples sound "averaged." This is what turns the
-   embedding table into a *space you can sample*.
+   normalizing flow is the upgrade if samples sound "averaged." A **small VAE over the
+   embeddings** (not over audio — see the option-(a) rejection in §3.2, which does not
+   apply at this scale) is the flow's sibling here, and is worth a try specifically if the
+   Studio's PCA axes prove too entangled to label: a learned latent may disentangle the
+   timbre axes that linear PCA smears together. Either upgrade is minutes to fit — it
+   trains on N vectors, not hours of audio. This is what turns the embedding table into a
+   *space you can sample*.
 3. **Sample → validate → persist.** Draw a novel embedding; render a standard test phrase
    set; auto-check it isn't a near-clone (cosine similarity to every training embedding
    below a threshold, e.g. < 0.85, using an independent speaker-verification embedder like
@@ -281,6 +286,9 @@ alignment exists (wave-2) — feeds it from day one.
 4. **Voice-bank novelty vs. quality tension** — sampled embeddings may sound averaged with
    few singers; mitigated by prioritizing singer *count* (how many distinct singers are
    in the N h? — worth adding to the manifest early) and the flow-upgrade path (§4).
+   External corpora that could raise the *permissively licensed* singer count are surveyed
+   in `docs/notes/candidate_corpora.md` — but run the singer census first; it may show the
+   gap is already closed.
 5. **MFA on native Windows** is the stack's most fragile install (Q5 decision) —
    mitigated by SOFA as first fallback and an MFA-only WSL2 env as second (§2).
 6. **Gaelic alignment path** (Q13, resolved: wave-2 confirmed; both Irish `ga` and
