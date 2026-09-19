@@ -53,6 +53,8 @@ def _note(start, end, midi, syllable, phonemes, stress=1, slur=False):
 
 
 def _valid_score() -> Score:
+    # ensure_ids(): 0.2 scores carry note ids, and load_score mints them on the way in,
+    # so a score built here without them would not compare equal after a round trip.
     return Score(
         bpm=120, key="G:major", language="en", phone_set="mfa_ipa/en_v1",
         notes=[
@@ -60,7 +62,7 @@ def _valid_score() -> Score:
             NoteEvent(start=0.5, end=1.0, midi=69, syllable="shine",
                       phonemes=[], stress=None, slur=True),
         ],
-    )
+    ).ensure_ids()
 
 
 class TestSchema:
@@ -69,6 +71,14 @@ class TestSchema:
         path = save_score(score, tmp_path / "score.json")
         assert load_score(path) == score
         assert validate_score_file(path) == []
+
+    def test_load_mints_ids_for_a_score_that_lacks_them(self, tmp_path):
+        path = tmp_path / "score.json"
+        bare = _valid_score().model_dump()
+        for n in bare["notes"]:
+            n.pop("id")
+        path.write_text(json.dumps(bare), encoding="utf-8")
+        assert [n.id for n in load_score(path).notes] == ["n0001", "n0002"]
 
     def test_rejects_overlapping_notes(self):
         with pytest.raises(ValidationError, match="overlapping"):

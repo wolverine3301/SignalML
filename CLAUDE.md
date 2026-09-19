@@ -55,6 +55,14 @@ features (S6) → dataset (S6b) → train (S7: acoustic/variance/vocoder) → sy
 - **Phone set: MFA IPA** (`mfa_ipa/en_v1`, versioned). All phoneme fields
   (`phones.json`, `score.json`) are IPA; stress is a separate field, never a phone
   suffix. Languages: English first, Gaelic wave-2 (OPEN_QUESTIONS Q13).
+- **Targeted editing (D12):** `score.json` is `signalml-score/0.2` — notes carry stable
+  `id`s. **Mint new ids, never renumber**, or saved references retarget silently. The
+  render unit is a **segment** (phrase, split at rests), not a song; a segment's content
+  hash drives the render cache, so anything that changes the audio must be in
+  `synth.render.RenderInputs` (bump `RENDER_KEY_VERSION` when you add a field) — an input
+  missing from the key serves stale audio with no error. Variance output (F0 +
+  durations) is a persisted artifact, not a temporary: it's what makes repairing a take
+  possible instead of rerolling it.
 - Stages are manifest-driven: query `manifest.jsonl` for work, write artifacts under
   `songs/<id>/`, update `status.*`. Never directory-scan for work.
 - Every stochastic step takes an explicit seed. Every stage is idempotent and has a

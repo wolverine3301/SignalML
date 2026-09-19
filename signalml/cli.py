@@ -345,6 +345,60 @@ def _cmd_score_from_midi(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_score_segments(args: argparse.Namespace) -> int:
+    import json as _json
+
+    from .score import load_score, split_segments
+
+    score = load_score(args.score)
+    segments = split_segments(score, min_rest_sec=args.min_rest)
+
+    if args.compare:
+        from .score import plan_rerender
+
+        edited = load_score(args.compare)
+        plan = plan_rerender(score, edited, min_rest_sec=args.min_rest)
+        # plan.render indexes the EDITED score's segments, not this file's: a segment
+        # only needs rendering because it is new, so it may not exist in `segments` at
+        # all (IndexError) or, worse, name a different phrase at the same position.
+        edited_segments = split_segments(edited, min_rest_sec=args.min_rest)
+        print(f"{args.score} -> {args.compare}: {plan.summary()}")
+        for idx in plan.render:
+            print(f"  RENDER  segment {idx}: {edited_segments[idx].text[:60]}")
+        return 0
+
+    if args.json:
+        print(_json.dumps([s.model_dump() for s in segments], indent=2,
+                          ensure_ascii=False))
+        return 0
+
+    print(f"{args.score}: {len(segments)} segments "
+          f"(min rest {args.min_rest}s, {len(score.notes)} notes)")
+    for seg in segments:
+        print(f"  [{seg.index:3d}] {seg.start:7.3f}-{seg.end:7.3f}s "
+              f"({seg.duration:5.2f}s, {len(seg.notes):2d} notes) "
+              f"{seg.content_hash[:12]}  {seg.text[:48]}")
+    return 0
+
+
+def _cmd_score_upgrade(args: argparse.Namespace) -> int:
+    import json as _json
+    from pathlib import Path
+
+    from .score import SCORE_FORMAT, load_score, save_score
+
+    for path in args.score:
+        before = _json.loads(Path(path).read_text(encoding="utf-8")).get("format")
+        score = load_score(path)  # upgrades in memory
+        if before == SCORE_FORMAT and not args.force:
+            print(f"ok {path} (already {SCORE_FORMAT})")
+            continue
+        save_score(score, path)
+        print(f"upgraded {path}: {before} -> {SCORE_FORMAT} "
+              f"({len(score.notes)} notes, ids minted)")
+    return 0
+
+
 def _cmd_score_phoneset(args: argparse.Namespace) -> int:
     from .score.phoneset import diff_against_mfa_dictionary, get_phone_set
 
@@ -381,6 +435,96 @@ def _cmd_dataset_build(args: argparse.Namespace) -> int:
     for rid, reason in sorted(summary.skipped.items()):
         print(f"  SKIPPED {rid}: {reason}", file=sys.stderr)
     return 0 if summary.clips else 1
+
+
+def _cmd_studio_serve(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .studio.server import serve
+
+    serve(resolve_data_root(args.data_root), host=args.host, port=args.port,
+          profile_name=args.profile, open_browser=args.open)
+    return 0
+
+
+_PLAN_MARK = {"clean": "cached", "dirty": "RENDER", "unknown": "?"}
+
+
+def _cmd_studio_plan(args: argparse.Namespace) -> int:
+    import json as _json
+
+    from .manifest import resolve_data_root
+    from .studio import build_render_plan
+
+    try:
+        plan = build_render_plan(
+            resolve_data_root(args.data_root),
+            args.score,
+            compare=args.compare,
+            voice=args.voice,
+            seed=args.seed,
+            profile_name=args.profile,
+            min_rest_sec=args.min_rest,
+        )
+    except FileNotFoundError as exc:
+        print(f"studio plan: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(_json.dumps(plan.model_dump(), indent=2, ensure_ascii=False))
+        return 0
+
+    head = plan.score_path
+    if plan.compare_path:
+        head += f" -> {plan.compare_path}"
+    print(f"{head}  [{plan.audio_profile}, seed {plan.seed}, "
+          f"voice {plan.voice or '(none)'}]")
+    print(f"  {plan.summary()}")
+    for row in plan.segments:
+        origin = "" if row.reused_from is None else f"  <- old {row.reused_from}"
+        print(f"  [{row.index:3d}] {row.start:7.3f}-{row.end:7.3f}s "
+              f"{_PLAN_MARK[row.state]:>6}  {row.content_hash[:12]}  "
+              f"{row.text[:44]}{origin}")
+    if plan.dropped:
+        print(f"  dropped from the old score: {plan.dropped}")
+    if not plan.estimate.calibrated:
+        print("  estimate: no timed renders yet — duration unknown until P8 "
+              "records elapsed_sec")
+    for note in plan.notes:
+        print(f"  note: {note}")
+    return 0
+
+
+def _cmd_studio_variance(args: argparse.Namespace) -> int:
+    import json as _json
+    from pathlib import Path
+
+    from .manifest import resolve_data_root
+    from .studio import read_variance, write_variance
+    from .synth import VarianceTrack
+
+    data_root = resolve_data_root(args.data_root)
+    if args.apply:
+        try:
+            track = VarianceTrack.model_validate(
+                _json.loads(Path(args.apply).read_text(encoding="utf-8")))
+            written = write_variance(data_root, args.key, track, notes=args.note)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"studio variance: {exc}", file=sys.stderr)
+            return 1
+        if not written.changed:
+            print(f"{args.key[:16]}: curve is unchanged — no new render minted")
+            return 0
+        print(f"{args.key[:16]} -> {written.key[:16]}  "
+              f"(variance {written.variance_sha256[:12]}, origin {track.origin})")
+        print("  the original render is untouched; A/B is just playing both keys")
+        return 0
+
+    try:
+        track = read_variance(data_root, args.key)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"studio variance: {exc}", file=sys.stderr)
+        return 1
+    print(_json.dumps(track.model_dump(), indent=2, ensure_ascii=False))
+    return 0
 
 
 def _cmd_dash(args: argparse.Namespace) -> int:
@@ -548,6 +692,8 @@ def _stub(name: str, phase: str, desc: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .score.segment import DEFAULT_MIN_REST_SEC
+
     # IPA phones must survive Windows' legacy cp1252 console (score/phoneset output)
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -758,6 +904,24 @@ def main(argv: list[str] | None = None) -> int:
     from_midi_p.add_argument("--track", type=int, default=None,
                              help="melody track index (default: first with notes)")
     from_midi_p.set_defaults(func=_cmd_score_from_midi)
+    segments_p = score_sub.add_parser(
+        "segments", help="split a score into phrase segments (the render/edit unit, D12)"
+    )
+    segments_p.add_argument("score", help="score.json path")
+    segments_p.add_argument("--min-rest", type=float, default=DEFAULT_MIN_REST_SEC,
+                            help=f"rest length that opens a new phrase "
+                                 f"(default: {DEFAULT_MIN_REST_SEC}s)")
+    segments_p.add_argument("--json", action="store_true", help="emit segments as JSON")
+    segments_p.add_argument("--compare", default=None, metavar="EDITED.json",
+                            help="an edited score: report what would need re-rendering")
+    segments_p.set_defaults(func=_cmd_score_segments)
+    upgrade_p = score_sub.add_parser(
+        "upgrade", help="rewrite score.json at the current format (mints note ids)"
+    )
+    upgrade_p.add_argument("score", nargs="+", help="score.json path(s), edited in place")
+    upgrade_p.add_argument("--force", action="store_true",
+                           help="rewrite even if already at the current format")
+    upgrade_p.set_defaults(func=_cmd_score_upgrade)
     phoneset_p = score_sub.add_parser(
         "phoneset", help="show a phone set / diff it against an MFA dictionary"
     )
@@ -791,6 +955,46 @@ def main(argv: list[str] | None = None) -> int:
     dash_p.set_defaults(func=_cmd_dash)
 
     # ship — LAN transfer of a corpus selection + the code that produced it
+    # studio (post-P8 UI; the model-free half is usable now - docs/STUDIO_UI.md)
+    studio_p = subparsers.add_parser(
+        "studio", help="voice/performance front-end: API server + render costing")
+    studio_sub = studio_p.add_subparsers(dest="command", required=True)
+
+    st_serve = studio_sub.add_parser("serve", help="run the Studio API server")
+    st_serve.add_argument("--data-root", default=None,
+                          help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    st_serve.add_argument("--host", default="127.0.0.1",
+                          help="bind address (0.0.0.0 to reach it from the laptop)")
+    st_serve.add_argument("--port", type=int, default=8770)
+    st_serve.add_argument("--profile", default=None,
+                          help="audio profile (default: $SIGNALML_AUDIO_PROFILE or YAML)")
+    st_serve.add_argument("--open", action="store_true", help="open a browser")
+    st_serve.set_defaults(func=_cmd_studio_serve)
+
+    st_plan = studio_sub.add_parser(
+        "plan", help="price a render before committing to it (the Studio's cost bar)")
+    st_plan.add_argument("score", help="score.json to render")
+    st_plan.add_argument("--compare", default=None,
+                         help="edited score.json: also report which phrases survive")
+    st_plan.add_argument("--voice", default=None,
+                         help="voice name; without it, cache state is unknown")
+    st_plan.add_argument("--seed", type=int, default=0)
+    st_plan.add_argument("--profile", default=None, help="audio profile")
+    st_plan.add_argument("--min-rest", type=float, default=DEFAULT_MIN_REST_SEC,
+                         help="phrase-split rest threshold in seconds")
+    st_plan.add_argument("--data-root", default=None)
+    st_plan.add_argument("--json", action="store_true", help="emit the plan as JSON")
+    st_plan.set_defaults(func=_cmd_studio_plan)
+
+    st_var = studio_sub.add_parser(
+        "variance", help="show or replace a cached render's F0/duration track")
+    st_var.add_argument("key", help="render cache key")
+    st_var.add_argument("--apply", default=None,
+                        help="edited variance JSON to persist as a NEW render")
+    st_var.add_argument("--note", default="", help="why it was edited")
+    st_var.add_argument("--data-root", default=None)
+    st_var.set_defaults(func=_cmd_studio_variance)
+
     ship_p = subparsers.add_parser(
         "ship", help="transfer a corpus selection + this repo to the training rig")
     ship_sub = ship_p.add_subparsers(dest="command", required=True)
