@@ -79,9 +79,18 @@ scripts/{binarize,train,infer}.py` — the interpreter path is a config value
 - **D3 (phone mapping):** the trainer dictionary is a tab-separated
   `syllable<TAB>ph ph ...` text file — *generated output* from `score/phoneset.py`,
   as planned. ⚠ Their docs say phoneme names "ASCII preferred", separators
-  (`/ - + @ # & | < >`) forbidden: IPA symbols (ʃ, ɫ̩) must be smoke-tested in the
-  overfit run; fallback is a deterministic ASCII transliteration table in
-  phoneset.py (X-SAMPA-style), which changes nothing upstream (phones.json stays IPA).
+  (`/ - + @ # & | < >`) forbidden. **Smoke test passed 2026-09-20** on the work PC:
+  their binarizer ingested all 87 IPA phones of `overfit_v1` (N clips / 1.N h)
+  and printed them back correctly, so the ASCII-transliteration fallback stays
+  unbuilt. Two real snags, both fixed in the generated config, neither a patch:
+  - `AP` (breath) and `SP` are *global* phonemes that always exist, and coverage is
+    enforced — a dataset that never emits `AP` is refused. We do not detect breaths,
+    so S6b emits `merged_phoneme_groups: [[AP, SP]]`; breaths train as silence,
+    which is what our alignments already call them. Drop the merge when S4/S5 learns
+    to mark breaths.
+  - their `base.yaml` sets `hnsep: vr`, which eagerly loads an NN checkpoint during
+    binarization even with every breathiness/voicing/tension embed off. S6b emits
+    their documented default `hnsep: world` (lazy, no checkpoint).
 - **D5 (mel contract):** resolved by adoption (above).
 - **D6 (vocoder):** own-vocoder training lives in a separate repo —
   **openvpi/SingingVocoders** — vendored at P7.4's start; their default acoustic

@@ -258,9 +258,12 @@ old parser deleted.
    **Amended 2026-09-20: run it at the `prod` profile, not `dev`.** Dev exists to make
    iteration bearable on an 8 GB card; on the 5090 that reason is gone, while dev would
    cost the only 44.1 kHz vocoder checkpoint we have (so: no listening) and fork the
-   mel contract for a checkpoint that is throwaway anyway. The run is also the D3 IPA
-   smoke test — if the vendored binarizer rejects IPA phoneme names, it does so here,
-   on a dataset that takes minutes to rebuild.
+   mel contract for a checkpoint that is throwaway anyway.
+   **Binarization already validated on the work PC 2026-09-20** (N clips / 1.N h,
+   12 valid): the D3 IPA smoke test passed and the two config snags it surfaced
+   (global `AP` coverage, eager `hnsep: vr` checkpoint) are fixed in S6b's generated
+   config — see `docs/notes/vendor_diffsinger.md`. What is left for the rig is the
+   training itself.
 6. **Multi-singer run:** full female dataset, **prod profile**, own vocoder; monitor
    per-singer quality. English-only first; Gaelic data joins per Q13 (wave-2 —
    phoneme-level IPA conditioning means added Gaelic data extends, not restructures,
