@@ -64,9 +64,13 @@ Newest last. One line each: what it is, whether it's critical path, and the verd
 
 | Branch | Tier | What | Needs |
 |---|---|---|---|
-| `aligner-eval-harness` | A (P5.4) | Aligner-eval harness, `signalml eval align/drift`, 1,736 lines | **Review first** — critical path, and it sits under the emotion branch |
-| `emotion-corpora-survey` | C (D10) | EARS + CREMA-D adapters, emotion contract, labeller calibration, 4,847 lines | Low urgency. Stacked on `aligner-eval-harness` — review that one first, or rebase this onto `main` |
-| `agent-queue` | — | This file, `/nextup`, Friday schedule | Review the priorities below; edit freely — it's your queue, not mine |
+| `emotion-corpora-survey` | C (D10) | EARS + CREMA-D adapters, emotion contract, labeller calibration, 4,847 lines | Low urgency, and deliberately **left out of `main`** on rig day 2026-09-20. Rebase onto `main` when it is wanted |
+
+**Merged to `main` 2026-09-20** (rig day — Logan's call to land everything but the
+emotion branch): `rig-prep` (P7.3 `signalml train` wrapper, preflight, run records,
+`trainer_opts`, `overfit_v1` / `full_acoustic_v2` recipes, bootstrap-script fixes —
+`scripts/bootstrap_rig.ps1` had never parsed under PowerShell 5.1), `aligner-eval-harness`
+(P5.4 eval + drift, landed unreviewed), `agent-queue` (this file).
 
 ---
 
