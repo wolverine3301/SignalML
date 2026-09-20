@@ -5,11 +5,15 @@ experiments to a production-grade modular pipeline. **Current state: all major
 decisions resolved (see the Resolved tables in OPEN_QUESTIONS.md); Migration P0–P4
 completed 2026-07-07; P5 (align) code + P6 (score format) completed 2026-07-12 —
 P5's corpus work (MFA install, real alignment runs, SOFA eval) still needs the
-dataset/rig.** The design docs below are the source of truth. Next actions: onboard
-the corpus (`manifest scan`/`report`, singer census), run P2–P5 over it, then **P7**
-(training + own vocoder; start vocoder as soon as clean stems exist). NOTE:
-development happens on Logan's laptop (GTX 1650); heavy/GPU work runs later on the
-5090 rig — clone the repo there and follow README "GPU install". F0 note: RMVPE is
+dataset/rig; P7.3 (`signalml train` wrapper + run records) done 2026-09-20, with the
+rig recipes `configs/dataset.overfit.yaml` (P7.5 sanity run, amended to the **prod**
+profile) and `configs/dataset.full_v2.yaml` (first multi-singer run).** The design
+docs below are the source of truth. Next actions: the first rig session — clone +
+`scripts/bootstrap_rig.ps1`, ship the corpus, rebuild the dataset *there* (generated
+configs carry absolute paths), `signalml train acoustic --dataset overfit_v1`; then
+the own vocoder (P7.4: openvpi/SingingVocoders is **not yet vendored**). NOTE:
+development happens on Logan's laptop (GTX 1650) and the 2080S work PC; heavy/GPU
+work runs on the 5090 rig — clone the repo there and follow README "GPU install". F0 note: RMVPE is
 not on PyPI; backends are pyin (default) / torchcrepe, with rmvpe vendored in P7.
 
 Dev loop: `python -m uv sync` · `python -m uv run pytest` · `python -m uv run ruff

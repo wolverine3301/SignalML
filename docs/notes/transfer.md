@@ -18,9 +18,11 @@ and all three are why this exists:
 2. **Prove the bytes arrived.** Every item carries a sha256. `ship verify` is the gate
    you run before committing a GPU to a multi-day run — a truncated wav should cost
    seconds, not eight hours.
-3. **Carry the code.** This repo has **no git remote**. The rig cannot clone from
-   anywhere, so the shipment carries a git bundle, and that bundle is the rig's clone
-   *and* its update path forever after.
+3. **Carry the code.** Written when this repo had **no git remote**; it now has one
+   (`github.com/wolverine3301/SignalML`), so a rig with network access clones from
+   there and pulls data with `ship pull --no-code`. The git bundle stays for the rig
+   that cannot reach GitHub: it is that machine's clone *and* its update path. Either
+   way the code arrives before the data, because `ship pull` runs through signalml.
 
 `robocopy` remains the right tool for a one-off dump of a directory you already
 understand. It is not the right tool for "give the rig what recipe X trains on".

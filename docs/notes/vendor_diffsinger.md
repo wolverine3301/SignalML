@@ -79,9 +79,18 @@ scripts/{binarize,train,infer}.py` — the interpreter path is a config value
 - **D3 (phone mapping):** the trainer dictionary is a tab-separated
   `syllable<TAB>ph ph ...` text file — *generated output* from `score/phoneset.py`,
   as planned. ⚠ Their docs say phoneme names "ASCII preferred", separators
-  (`/ - + @ # & | < >`) forbidden: IPA symbols (ʃ, ɫ̩) must be smoke-tested in the
-  overfit run; fallback is a deterministic ASCII transliteration table in
-  phoneset.py (X-SAMPA-style), which changes nothing upstream (phones.json stays IPA).
+  (`/ - + @ # & | < >`) forbidden. **Smoke test passed 2026-09-20** on the work PC:
+  their binarizer ingested all 87 IPA phones of `overfit_v1` (873 clips / 1.78 h)
+  and printed them back correctly, so the ASCII-transliteration fallback stays
+  unbuilt. Two real snags, both fixed in the generated config, neither a patch:
+  - `AP` (breath) and `SP` are *global* phonemes that always exist, and coverage is
+    enforced — a dataset that never emits `AP` is refused. We do not detect breaths,
+    so S6b emits `merged_phoneme_groups: [[AP, SP]]`; breaths train as silence,
+    which is what our alignments already call them. Drop the merge when S4/S5 learns
+    to mark breaths.
+  - their `base.yaml` sets `hnsep: vr`, which eagerly loads an NN checkpoint during
+    binarization even with every breathiness/voicing/tension embed off. S6b emits
+    their documented default `hnsep: world` (lazy, no checkpoint).
 - **D5 (mel contract):** resolved by adoption (above).
 - **D6 (vocoder):** own-vocoder training lives in a separate repo —
   **openvpi/SingingVocoders** — vendored at P7.4's start; their default acoustic
@@ -91,12 +100,34 @@ scripts/{binarize,train,infer}.py` — the interpreter path is a config value
   embedding table; profile pins checkpoint hash as designed. Embedding extraction
   reads the table out of their checkpoint format.
 
-## Checklist to first sound (dev-profile overfit, P7.5)
+## Checklist to first sound (overfit run, P7.5)
 
 1. Trainer venv created (recipe above) — GPU smoke: their `scripts/train.py --help`.
+   `scripts/bootstrap_rig.ps1` does this, including the cu128 torch swap *inside*
+   this venv (their `requirements.txt` leaves torch unpinned on purpose, so without
+   the swap the trainer gets a CPU wheel and dies at the first kernel launch).
 2. S6b: manifest query → clip cutting (S4 silence map) → transcriptions.csv
    (acoustic columns first) → generated config + dictionary.
 3. Overfit set: 2–3 songs, hand/SOME note labels for the variance step (or
    acoustic-only first: resynthesize with ground-truth durations — hears sound
-   before D1 is solved).
+   before D1 is solved). `configs/dataset.overfit.yaml` is that set, at the **prod**
+   profile (MIGRATION_PLAN P7.5, amended 2026-09-20).
 4. Community vocoder checkpoint downloaded into their `checkpoints/` (NC, dev only).
+
+## How a run is driven (P7.3, 2026-09-20)
+
+`signalml train acoustic --dataset <name>` (`signalml/train/runner.py`, wiring in
+`configs/train.yaml`) runs steps 2–4's output through their `binarize.py` then
+`train.py`, with `cwd = third_party/DiffSinger` — their `base_config` and
+`vocoder_ckpt` paths are relative to it — and `PYTHONUTF8=1`, without which Windows'
+cp1252 mangles IPA phoneme names somewhere between the dictionary and the phone set.
+Zero patches still holds: we add a preflight and a run record around their scripts,
+never inside them.
+
+Consequence of adopting their world: **checkpoints live in
+`third_party/DiffSinger/checkpoints/<exp_name>/`**, because `work_dir` is derived from
+`--exp_name` relative to the process CWD and moving it would mean patching
+`utils/hparams.py`. Our run record under `<DATA_ROOT>/runs/<exp>/<timestamp>/` points
+at that directory and carries the provenance (git hash, dataset-card hash, config +
+dictionary snapshot, torch/CUDA probe). Watch free space on the repo's drive —
+`signalml train` warns below `min_free_gb`.

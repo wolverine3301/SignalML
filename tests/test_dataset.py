@@ -10,7 +10,7 @@ import pytest
 import soundfile as sf
 import yaml
 
-from signalml.config import active_profile
+from signalml.config import CONFIGS_DIR, active_profile
 from signalml.manifest import Manifest, scan_directory
 from signalml.stages.common import song_dir, update_analysis
 from signalml.stages.dataset import (
@@ -134,6 +134,75 @@ class TestBuild:
 
         card = (summary.out_dir / "dataset_card.md").read_text(encoding="utf-8")
         assert "alice" in card and "personal research use" in card
+
+    def test_global_breath_token_is_merged_into_silence(self, tmp_path, make_wav):
+        """AP and SP always exist in their phoneme set, and their binarizer refuses
+        a dataset that never uses one. We do not detect breaths yet."""
+        root = tmp_path / "dr"
+        _ready_song(root, make_wav)
+        summary = build(root, recipe=recipe())
+        config = yaml.safe_load(
+            (summary.out_dir / "config_acoustic.yaml").read_text(encoding="utf-8"))
+        assert config["merged_phoneme_groups"] == [["AP", "SP"]]
+        # hn-sep defaults to WORLD: 'vr' loads an NN checkpoint during binarization
+        # even though no breathiness/voicing/tension embed consumes it
+        assert config["hnsep"] == "world" and "hnsep_ckpt" not in config
+
+    def test_breath_tokens_end_the_merge(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        phones = [dict(p) for p in PHONES]
+        phones[1] = {**phones[1], "ph": "AP"}
+        _ready_song(root, make_wav, phones=phones)
+        summary = build(root, recipe=recipe())
+        config = yaml.safe_load(
+            (summary.out_dir / "config_acoustic.yaml").read_text(encoding="utf-8"))
+        assert config["merged_phoneme_groups"] == []
+
+    def test_trainer_opts_reach_the_generated_config(self, tmp_path, make_wav):
+        """Batch sizing is a property of the box, so it belongs in the recipe."""
+        root = tmp_path / "dr"
+        _ready_song(root, make_wav)
+        summary = build(root, recipe=recipe(trainer_opts={
+            "max_batch_frames": 80000, "max_batch_size": 64,
+            "binarization_workers": 8, "num_ckpt_keep": 3, "max_updates": 20000,
+            "hnsep": "vr", "hnsep_ckpt": "checkpoints/vr/model.pt",
+            "val_with_vocoder": True, "extra": {"lr": 0.0004},
+        }))
+        config = yaml.safe_load(
+            (summary.out_dir / "config_acoustic.yaml").read_text(encoding="utf-8"))
+        assert config["max_batch_frames"] == 80000
+        assert config["max_batch_size"] == 64
+        assert config["binarization_args"]["num_workers"] == 8
+        assert config["num_ckpt_keep"] == 3 and config["max_updates"] == 20000
+        # explicit override beats the profile-derived default (dev would be False)
+        assert config["val_with_vocoder"] is True
+        assert config["lr"] == 0.0004
+        assert config["hnsep"] == "vr"
+        assert config["hnsep_ckpt"] == "checkpoints/vr/model.pt"
+
+    def test_unset_trainer_opts_are_left_to_the_vendored_config(self, tmp_path,
+                                                                make_wav):
+        root = tmp_path / "dr"
+        _ready_song(root, make_wav)
+        summary = build(root, recipe=recipe())
+        config = yaml.safe_load(
+            (summary.out_dir / "config_acoustic.yaml").read_text(encoding="utf-8"))
+        assert "max_updates" not in config and "num_ckpt_keep" not in config
+
+    def test_extra_cannot_overwrite_the_audio_contract(self):
+        """D5: mel params come from the profile or the run is silently corrupt."""
+        with pytest.raises(ValueError, match="audio_sample_rate"):
+            recipe(trainer_opts={"extra": {"audio_sample_rate": 22050}})
+
+    def test_shipped_rig_recipes_are_valid(self):
+        for name in ("dataset.overfit.yaml", "dataset.full_v2.yaml"):
+            r = load_dataset_recipe(CONFIGS_DIR / name)
+            assert r.profile == "prod"  # the rig trains at prod, dev is throwaway
+            assert r.trainer_opts.max_batch_frames > 30000  # sized for the 5090
+        overfit = load_dataset_recipe(CONFIGS_DIR / "dataset.overfit.yaml")
+        assert len(overfit.filters.singers) == 3
+        assert load_dataset_recipe(
+            CONFIGS_DIR / "dataset.full_v2.yaml").filters.min_singer_minutes == 5.0
 
     def test_filters_and_reasons(self, tmp_path, make_wav):
         root = tmp_path / "dr"
