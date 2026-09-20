@@ -13,8 +13,10 @@ Refusals are per-song and loud: null gender, below-threshold alignment, profile
 mismatch (clips must come from the recipe's audio profile end-to-end, Q11).
 ``trainer: variance`` is blocked until D1 lands note labels (note_seq/note_dur).
 Phoneme tokens are IPA straight from phones.json plus SP (silence) — the D3
-ASCII-transliteration fallback activates only if the overfit smoke test rejects
-IPA symbols.
+smoke test passed on 2026-09-20: the vendored binarizer accepts all 87 IPA names,
+so the ASCII-transliteration fallback stays unused. AP (breath) is a global token
+we never emit, so the generated config merges it into SP (see
+``_write_trainer_config``).
 """
 
 from __future__ import annotations
@@ -93,6 +95,13 @@ class TrainerOpts(BaseModel):
     max_batch_size: int = 16        # their acoustic template: 64
     binarization_workers: int = 4
     pe: str = "parselmouth"         # no checkpoint needed; rmvpe is a quality upgrade
+    # Harmonic-noise separation. Their base.yaml ships 'vr', which loads an NN
+    # checkpoint eagerly during binarization even when nothing consumes its output
+    # — and we train no breathiness/voicing/tension embeds, so nothing does. 'world'
+    # is their documented default, needs no checkpoint, and stays lazy. Switch to
+    # 'vr' (with hnsep_ckpt) the day those embeds go on.
+    hnsep: str = "world"
+    hnsep_ckpt: str | None = None
     vocoder: str = "NsfHifiGAN"
     # community NC checkpoint = dev preview ONLY (Q4); own vocoder replaces it
     vocoder_ckpt: str =         "checkpoints/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.ckpt"
@@ -433,7 +442,8 @@ def build(
             writer.writerows(rows)
 
     _write_dictionary(out_dir, phones_used, recipe.filters.language)
-    _write_trainer_config(out_dir, recipe, selected, spk_ids, per_folder_rows)
+    _write_trainer_config(out_dir, recipe, selected, spk_ids, per_folder_rows,
+                          phones_used)
     _write_card(out_dir, recipe, summary, per_speaker_stats, spk_ids, licenses,
                 corpora, align_scores)
     return summary
@@ -454,6 +464,7 @@ def _write_trainer_config(
     selected: list[ManifestRecord],
     spk_ids: dict[str, int],
     per_folder_rows: dict[str, list[tuple[str, str, str]]],
+    phones_used: set[str],
 ) -> None:
     profile = active_profile(recipe.profile)
     opts = recipe.trainer_opts
@@ -476,11 +487,18 @@ def _write_trainer_config(
         "dictionaries": {
             lang: (out_dir / f"dictionary_{lang}.txt").resolve().as_posix()},
         "extra_phonemes": [],
-        "merged_phoneme_groups": [],
+        # AP (breath) and SP (silence) are *global* phonemes in their phoneme set:
+        # both always exist, and their binarizer refuses a dataset that never uses
+        # one ("phonemes are not covered in transcriptions"). We do not detect
+        # breaths yet, so AP is merged into SP — breaths train as silence, which is
+        # what they already are in our alignments. Undo the merge (and rebuild) the
+        # day S4/S5 emits AP.
+        "merged_phoneme_groups": ([] if AP in phones_used else [[AP, SP]]),
         "datasets": datasets_cfg,
         "binary_data_dir": (out_dir / "binary").resolve().as_posix(),
         "binarization_args": {"num_workers": opts.binarization_workers},
         "pe": opts.pe,
+        "hnsep": opts.hnsep,
         "use_lang_id": False,
         "num_lang": 1,
         "use_spk_id": True,
@@ -505,7 +523,8 @@ def _write_trainer_config(
         "max_batch_frames": opts.max_batch_frames,
         "max_batch_size": opts.max_batch_size,
     }
-    for key, value in (("max_updates", opts.max_updates),
+    for key, value in (("hnsep_ckpt", opts.hnsep_ckpt),
+                       ("max_updates", opts.max_updates),
                        ("val_check_interval", opts.val_check_interval),
                        ("num_ckpt_keep", opts.num_ckpt_keep)):
         if value is not None:

@@ -135,6 +135,29 @@ class TestBuild:
         card = (summary.out_dir / "dataset_card.md").read_text(encoding="utf-8")
         assert "alice" in card and "personal research use" in card
 
+    def test_global_breath_token_is_merged_into_silence(self, tmp_path, make_wav):
+        """AP and SP always exist in their phoneme set, and their binarizer refuses
+        a dataset that never uses one. We do not detect breaths yet."""
+        root = tmp_path / "dr"
+        _ready_song(root, make_wav)
+        summary = build(root, recipe=recipe())
+        config = yaml.safe_load(
+            (summary.out_dir / "config_acoustic.yaml").read_text(encoding="utf-8"))
+        assert config["merged_phoneme_groups"] == [["AP", "SP"]]
+        # hn-sep defaults to WORLD: 'vr' loads an NN checkpoint during binarization
+        # even though no breathiness/voicing/tension embed consumes it
+        assert config["hnsep"] == "world" and "hnsep_ckpt" not in config
+
+    def test_breath_tokens_end_the_merge(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        phones = [dict(p) for p in PHONES]
+        phones[1] = {**phones[1], "ph": "AP"}
+        _ready_song(root, make_wav, phones=phones)
+        summary = build(root, recipe=recipe())
+        config = yaml.safe_load(
+            (summary.out_dir / "config_acoustic.yaml").read_text(encoding="utf-8"))
+        assert config["merged_phoneme_groups"] == []
+
     def test_trainer_opts_reach_the_generated_config(self, tmp_path, make_wav):
         """Batch sizing is a property of the box, so it belongs in the recipe."""
         root = tmp_path / "dr"
@@ -142,6 +165,7 @@ class TestBuild:
         summary = build(root, recipe=recipe(trainer_opts={
             "max_batch_frames": 80000, "max_batch_size": 64,
             "binarization_workers": 8, "num_ckpt_keep": 3, "max_updates": 20000,
+            "hnsep": "vr", "hnsep_ckpt": "checkpoints/vr/model.pt",
             "val_with_vocoder": True, "extra": {"lr": 0.0004},
         }))
         config = yaml.safe_load(
@@ -153,6 +177,8 @@ class TestBuild:
         # explicit override beats the profile-derived default (dev would be False)
         assert config["val_with_vocoder"] is True
         assert config["lr"] == 0.0004
+        assert config["hnsep"] == "vr"
+        assert config["hnsep_ckpt"] == "checkpoints/vr/model.pt"
 
     def test_unset_trainer_opts_are_left_to_the_vendored_config(self, tmp_path,
                                                                 make_wav):
