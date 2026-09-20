@@ -28,3 +28,21 @@ segmentation:
   drop_noise_clips: true   # clips containing spn (alignment holes) are excluded
 
 test_clips_per_speaker: 2
+
+# Machine-shaped knobs for the generated trainer config (never data or audio: the
+# mel contract comes from the profile, and `extra` refuses those keys, D5).
+# These defaults fit an 8 GB card; the rig recipes raise them.
+trainer_opts:
+  max_batch_frames: 30000   # their acoustic template: 50000
+  max_batch_size: 16        # their acoustic template: 64
+  binarization_workers: 4
+  pe: parselmouth           # rmvpe is a quality upgrade, needs its own checkpoint
+  # CC BY-NC community checkpoint: dev preview only (Q4), path is relative to
+  # third_party/DiffSinger. val_with_vocoder: null = auto (on at prod, off at dev).
+  vocoder: NsfHifiGAN
+  vocoder_ckpt: checkpoints/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.ckpt
+  val_with_vocoder: null
+  max_updates: null         # null = whatever the vendored config says (160000)
+  val_check_interval: null
+  num_ckpt_keep: null
+  extra: {}                 # any other vendored-trainer key, merged last

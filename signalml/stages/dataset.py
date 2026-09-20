@@ -30,7 +30,7 @@ from typing import Literal
 
 import soundfile as sf
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..config import CONFIGS_DIR, active_profile
 from ..manifest import Manifest, ManifestRecord
@@ -69,6 +69,53 @@ class SegmentationCfg(BaseModel):
     drop_noise_clips: bool = True  # clips containing spn (alignment holes)
 
 
+# The mel/audio contract is owned end-to-end by the active audio profile (D5,
+# docs/notes/vendor_diffsinger.md). These keys are written from the profile and may
+# never be hand-set in a recipe: a dataset binarized at one sample rate and trained
+# under another fails silently, which is the exact bug class CLAUDE.md names.
+PROFILE_OWNED_KEYS = frozenset({
+    "audio_sample_rate", "audio_num_mel_bins", "hop_size", "fft_size", "win_size",
+    "fmin", "fmax", "mel_base", "dictionaries", "datasets", "binary_data_dir",
+    "num_spk", "use_spk_id", "num_lang", "use_lang_id",
+})
+
+
+class TrainerOpts(BaseModel):
+    """Machine-shaped knobs for the generated trainer config.
+
+    Everything here is about *the box the run happens on*, not about the data — the
+    defaults are sized for an 8 GB card (the 2080S work PC) so a laptop build is
+    runnable, and the rig recipes raise them. ``extra`` is the escape hatch for any
+    other vendored-trainer key, merged last, with the audio contract fenced off.
+    """
+
+    max_batch_frames: int = 30000   # their acoustic template: 50000
+    max_batch_size: int = 16        # their acoustic template: 64
+    binarization_workers: int = 4
+    pe: str = "parselmouth"         # no checkpoint needed; rmvpe is a quality upgrade
+    vocoder: str = "NsfHifiGAN"
+    # community NC checkpoint = dev preview ONLY (Q4); own vocoder replaces it
+    vocoder_ckpt: str =         "checkpoints/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.ckpt"
+    # None = auto: vocoder validation only at prod (no dev-profile vocoder exists)
+    val_with_vocoder: bool | None = None
+    max_updates: int | None = None      # None = their config's value
+    val_check_interval: int | None = None
+    num_ckpt_keep: int | None = None
+    extra: dict[str, object] = {}
+
+    @field_validator("extra")
+    @classmethod
+    def _no_profile_keys(cls, v: dict[str, object]) -> dict[str, object]:
+        clash = sorted(set(v) & PROFILE_OWNED_KEYS)
+        if clash:
+            raise ValueError(
+                f"trainer_opts.extra may not set {clash}: those come from the audio "
+                f"profile and the manifest (D5 mel contract). Change the profile or "
+                f"the recipe filters instead."
+            )
+        return v
+
+
 class DatasetRecipe(BaseModel):
     name: str
     trainer: Literal["acoustic", "variance"] = "acoustic"
@@ -76,6 +123,7 @@ class DatasetRecipe(BaseModel):
     filters: DatasetFilters = Field(default_factory=DatasetFilters)
     segmentation: SegmentationCfg = Field(default_factory=SegmentationCfg)
     test_clips_per_speaker: int = 2
+    trainer_opts: TrainerOpts = Field(default_factory=TrainerOpts)
 
 
 def load_dataset_recipe(path: str | Path | None = None) -> DatasetRecipe:
@@ -408,6 +456,7 @@ def _write_trainer_config(
     per_folder_rows: dict[str, list[tuple[str, str, str]]],
 ) -> None:
     profile = active_profile(recipe.profile)
+    opts = recipe.trainer_opts
     lang = recipe.filters.language
     datasets_cfg = []
     for folder in sorted(per_folder_rows):
@@ -430,8 +479,8 @@ def _write_trainer_config(
         "merged_phoneme_groups": [],
         "datasets": datasets_cfg,
         "binary_data_dir": (out_dir / "binary").resolve().as_posix(),
-        "binarization_args": {"num_workers": 4},
-        "pe": "parselmouth",  # no checkpoint needed; rmvpe is a quality upgrade later
+        "binarization_args": {"num_workers": opts.binarization_workers},
+        "pe": opts.pe,
         "use_lang_id": False,
         "num_lang": 1,
         "use_spk_id": True,
@@ -445,16 +494,23 @@ def _write_trainer_config(
         "fmax": profile.fmax or profile.sample_rate // 2,
         "mel_base": "e",
         # community NC checkpoint = dev preview ONLY (Q4); own vocoder replaces it
-        "vocoder": "NsfHifiGAN",
-        "vocoder_ckpt":
-            "checkpoints/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.ckpt",
+        "vocoder": opts.vocoder,
+        "vocoder_ckpt": opts.vocoder_ckpt,
         # dev profile has no matching vocoder checkpoint — skip vocoder validation
-        "val_with_vocoder": recipe.profile == "prod",
-        # conservative batch sizing for 8 GB cards (RTX 2080S work PC); raise on the
-        # 5090 rig (their template defaults: 50000 / 64)
-        "max_batch_frames": 30000,
-        "max_batch_size": 16,
+        "val_with_vocoder": (recipe.profile == "prod"
+                             if opts.val_with_vocoder is None
+                             else opts.val_with_vocoder),
+        # batch sizing is a property of the box, not the data: defaults fit an 8 GB
+        # card, the rig recipes raise them (their template defaults: 50000 / 64)
+        "max_batch_frames": opts.max_batch_frames,
+        "max_batch_size": opts.max_batch_size,
     }
+    for key, value in (("max_updates", opts.max_updates),
+                       ("val_check_interval", opts.val_check_interval),
+                       ("num_ckpt_keep", opts.num_ckpt_keep)):
+        if value is not None:
+            config[key] = value
+    config.update(opts.extra)  # validated against PROFILE_OWNED_KEYS at load time
     (out_dir / f"config_{recipe.trainer}.yaml").write_text(
         "# GENERATED by `signalml dataset build` — edit the recipe, not this file.\n"
         "# License note: the referenced community vocoder ckpt is CC BY-NC (dev\n"
