@@ -176,6 +176,11 @@ passes; no anonymous `arr_0` keys anywhere.
 4. Evaluate **SOFA** on 3–5 real separated vocals vs MFA; record verdict + samples in
    `docs/notes/aligner_eval.md`. (Singing-oriented aligner may beat speech-model MFA on
    held vowels; cheap eval, decides the default aligner going forward.)
+   **Harness landed 2026-09-18** — `signalml/evaluation/` + `signalml eval align|drift`,
+   with the protocol, metrics and ground-truth sources written up in that note. What
+   remains is running it: the reference checkout, the corpus, and MFA on the rig. The
+   eval also calibrates `quality.align_score`, which already gates training-set inclusion
+   but has never been checked against a real error measure.
 5. Delete `signalml/ingest/textgrid.py` + `phonemes.py` after their consumers are ported
    (segment extraction by phoneme moves into `stages/dataset.py` if still needed).
 6. Tests: TextGrid fixture → phones.json golden file; converter rejects phones outside
@@ -186,6 +191,14 @@ passes; no anonymous `arr_0` keys anywhere.
    green-lit, this phase gains per-language configs: espeak-ng-bootstrapped `ga`/`gd`
    dictionaries → MFA custom acoustic-model training on the transcribed subsets.
    Nothing downstream changes (`phones.json` is language-tagged IPA).
+   **Confirmed 2026-09-18: MFA ships no Irish and no Scottish Gaelic acoustic model or
+   dictionary** (~30 pretrained languages, no Goidelic), so "per-language config" here
+   means training an aligner, not selecting one — the wave-2 deferral is correctly scoped.
+   Better inputs than espeak-ng bootstrapping alone: **Common Voice** `ga-IE`/`gd` (CC0)
+   for acoustic-model training, and **WikiPron** Wiktionary-IPA scrapes for the dictionary
+   and G2P — the same pipeline MFA's own 3.0 dictionaries came from. See
+   `docs/notes/candidate_corpora.md`; the eval protocol in `docs/notes/aligner_eval.md`
+   applies unchanged, but the ground truth will have to be hand-annotated.
 
 **Done when:** ≥3 real songs have `phones.json` with plausible boundaries (spot-check by
 listening to sliced phonemes); lyrics-coverage report exists; aligner eval note written;
@@ -299,6 +312,14 @@ MIDI + soundfont → stems via FluidSynth; key/BPM transforms on MIDI are exact 
 2. then melody/accompaniment *generation* (evaluate small symbolic transformers vs.
 existing checkpoints at that time — do not pre-decide now); 3. shared score JSON is
 already the bridge to the singer.
+
+Candidate set for step 2, recorded so it is not lost: small symbolic transformers (the
+likely quality winner past a few bars), existing checkpoints of the day, **and
+MusicVAE-class latent models** — hierarchical VAEs over MIDI. The last is weaker at length
+but is the only family that hands you a smooth, slider-able latent for free, which would
+give backing tracks the same audition UX the Voice Lab gives voices (STUDIO.md §3). If
+that interaction matters more than long-form coherence, it changes the answer. Note this
+is latent-over-*symbolic*, not the latent-over-mels option ARCHITECTURE §3.2 rejected.
 
 **Done when:** `render` produces a backing track in a chosen key/BPM/instrument that
 `sing --mix` consumes.
