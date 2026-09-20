@@ -1,0 +1,23 @@
+# S7 trainer wiring (docs/notes/vendor_diffsinger.md). Machine-local: the vendored
+# trainer lives outside our uv env, in its own py3.10 venv, and rigs disagree about
+# where interpreters sit. Nothing here changes what is trained - that is the dataset
+# recipe's job (configs/dataset*.yaml, `trainer_opts`).
+
+trainer_dir: third_party/DiffSinger
+# null = autodetect third_party/DiffSinger/.venv (Scripts\python.exe on Windows,
+# bin/python elsewhere). Set it explicitly if the trainer venv lives off-repo.
+trainer_python: null
+
+# Run records land in <DATA_ROOT>/<runs_dirname>/<exp_name>/<timestamp>/.
+# Checkpoints do NOT: the vendored trainer writes them to checkpoints/<exp_name>
+# inside the submodule, and we adopt their world rather than patch it (D2).
+runs_dirname: runs
+
+# IPA phoneme names must survive the trip through the trainer on Windows, whose
+# default cp1252 turns them into garbage that only surfaces as "unknown phoneme".
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+
+# Warn (not refuse) when the drive holding the submodule is this tight.
+min_free_gb: 50.0

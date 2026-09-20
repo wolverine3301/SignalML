@@ -119,8 +119,8 @@ def check_torch() -> list[Check]:
     if cuda_build is None:
         checks.append(Check(
             "torch cuda build", "fail", f"{version} is a CPU-only wheel",
-            "python -m uv pip install --upgrade torch torchaudio "
-            "--index-url https://download.pytorch.org/whl/cu128"))
+            "python -m uv pip install --python .venv/Scripts/python.exe --reinstall "
+            "torch torchaudio --index-url https://download.pytorch.org/whl/cu128"))
         return checks
     checks.append(Check("torch cuda build", "ok", f"cu{cuda_build.replace('.', '')}"))
 
@@ -203,11 +203,61 @@ def check_submodule(repo_root: Path = REPO_ROOT) -> list[Check]:
     venv = sub / ".venv"
     if venv.is_dir():
         checks.append(Check("DiffSinger venv", "ok", str(venv)))
+        checks.append(check_trainer_torch(venv))
     else:
         checks.append(Check(
             "DiffSinger venv", "warn", f"{venv} missing (the trainer needs py3.10)",
             "scripts/bootstrap_rig.ps1 creates it; see docs/notes/vendor_diffsinger.md"))
     return checks
+
+
+_TRAINER_PROBE = (
+    "import json,torch;"
+    "a=torch.cuda.is_available();"
+    "print(json.dumps({'v':torch.__version__,'cuda':torch.version.cuda,'avail':a,"
+    "'name':torch.cuda.get_device_name(0) if a else None,"
+    "'cap':list(torch.cuda.get_device_capability(0)) if a else None,"
+    "'archs':torch.cuda.get_arch_list()}))"
+)
+
+
+def check_trainer_torch(venv: Path) -> Check:
+    """Probe torch *inside the trainer venv* — the one that runs the GPU for days.
+
+    ``requirements.txt`` deliberately leaves torch unpinned ("install PyTorch
+    manually"), so this venv is exactly where a CPU wheel hides: it imports fine and
+    dies at the first kernel launch, which on a multi-day run is an expensive way to
+    find out. Separate from ``check_torch``, which sees only the pipeline venv.
+    """
+    name = "DiffSinger torch"
+    python = venv / "Scripts" / "python.exe"
+    if not python.exists():
+        python = venv / "bin" / "python"
+    if not python.exists():
+        return Check(name, "warn", f"no interpreter in {venv}",
+                     "scripts/bootstrap_rig.ps1 recreates the trainer venv")
+    fix = ("python -m uv pip install --python "
+           f"{python} --reinstall torch torchaudio "
+           "--index-url https://download.pytorch.org/whl/cu128")
+    code, out = _run(str(python), "-c", _TRAINER_PROBE, timeout=180.0)
+    if code != 0:
+        return Check(name, "fail", f"probe failed: {out.splitlines()[-1] if out else code}",
+                     fix)
+    try:
+        import json as _json
+        info = _json.loads(out.splitlines()[-1])
+    except (ValueError, IndexError):
+        return Check(name, "warn", f"unreadable probe output: {out[:80]}", fix)
+    if not info["cuda"] or not info["avail"]:
+        return Check(name, "fail",
+                     f"{info['v']} in the trainer venv has no usable CUDA "
+                     f"(cuda={info['cuda']}, available={info['avail']})", fix)
+    cap = f"sm_{info['cap'][0]}{info['cap'][1]}"
+    if info["archs"] and cap not in info["archs"]:
+        return Check(name, "fail",
+                     f"{info['v']} was built for {', '.join(info['archs'])} — no {cap} "
+                     f"kernels for {info['name']}", fix)
+    return Check(name, "ok", f"{info['v']} / {info['name']} ({cap})")
 
 
 def check_audio_profiles() -> Check:

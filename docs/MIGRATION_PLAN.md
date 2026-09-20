@@ -231,8 +231,16 @@ old parser deleted.
 2. Implement S6b `signalml dataset build`: manifest query → trainer's binarized format;
    `dataset_card.md` with hours/singers/license roll-up. Refuse records with null gender
    or below alignment-confidence threshold.
-3. Implement `signalml train acoustic|variance` wrappers: our YAML → vendored configs;
-   run dir = config snapshot + git hash + dataset name. bf16 on; batch/grad-accum in YAML.
+3. ✅ DONE 2026-09-20: `signalml train acoustic|variance|vocoder` wrapper
+   (`signalml/train/runner.py`, wiring in `configs/train.yaml`). Per-run dir
+   `<DATA_ROOT>/runs/<exp>/<timestamp>/run.json` = config + dictionary snapshot, git
+   hash, dataset-card hash, exact command line, trainer-venv torch/CUDA probe.
+   Batch sizing moved into the recipe (`trainer_opts`) so it is a property of the box,
+   not of a generated file marked "do not edit". Preflight refuses, in milliseconds,
+   what would otherwise fail hours in: missing trainer venv, unbuilt dataset, a config
+   whose absolute dataset paths belong to another machine, mel parameters matching no
+   audio profile (D5), `val_with_vocoder` with no vocoder checkpoint on disk.
+   `variance` and `vocoder` report their blockers (D1 / P7.4) instead of pretending.
 4. **Own-vocoder training (first-class milestone — Q4 decision).** Vocoder training
    needs only clean vocal audio (no alignments), so **start it as soon as P3/P4 output
    exists**, in parallel with P5/P6: NSF-HiFiGAN-class architecture from the vendored
@@ -243,13 +251,23 @@ old parser deleted.
    *only* as a temporary dev preview meanwhile (CC BY-NC — record it in run configs;
    never ship artifacts rendered with it).
 5. **First training milestone — overfit sanity run:** tiny dataset (even 30 min, 2–3
-   singers), **dev profile** (22.05 kHz, Q11) for fast iteration, train until it can
-   resing a training snippet recognizably. This validates the entire data path before
-   burning days on real runs. (Dev-profile checkpoints are throwaway by definition.)
+   singers), train until it can resing a training snippet recognizably. This validates
+   the entire data path before burning days on real runs.
+   Recipe: `configs/dataset.overfit.yaml` (`overfit_v1` — the three singers with the
+   most clipped audio, ~1.8 h).
+   **Amended 2026-09-20: run it at the `prod` profile, not `dev`.** Dev exists to make
+   iteration bearable on an 8 GB card; on the 5090 that reason is gone, while dev would
+   cost the only 44.1 kHz vocoder checkpoint we have (so: no listening) and fork the
+   mel contract for a checkpoint that is throwaway anyway. The run is also the D3 IPA
+   smoke test — if the vendored binarizer rejects IPA phoneme names, it does so here,
+   on a dataset that takes minutes to rebuild.
 6. **Multi-singer run:** full female dataset, **prod profile**, own vocoder; monitor
    per-singer quality. English-only first; Gaelic data joins per Q13 (wave-2 —
    phoneme-level IPA conditioning means added Gaelic data extends, not restructures,
-   this run).
+   this run). Recipe: `configs/dataset.full_v2.yaml` (`full_acoustic_v2` =
+   `full_acoustic_v1` plus a 5-minute-per-speaker floor: v1's 160 speakers include 111
+   under five minutes, whose embeddings are noise in the space the voice bank samples
+   from. v1 stays on disk as the control).
 7. Implement voice bank (`signalml voice new` per contracts §5): embedding extraction
    from checkpoint, Gaussian fit, sampling, ECAPA similarity guard, profile persistence,
    ref-phrase rendering. Include `voice reproject` (re-fit an existing profile under a

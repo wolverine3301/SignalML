@@ -17,8 +17,10 @@ regenerate for free:
     the above plus ``stems/`` (and the source audio with ``--with-raw``) — only worth
     it if you intend to re-separate or re-align on the rig.
 
-``--with-code`` adds a git bundle. This repo has no remote, so the bundle *is* the
-rig's clone/update path (clone on first pull, fetch + checkout on every one after).
+``--with-code`` adds a git bundle: the clone/update path for a rig that cannot reach
+the GitHub remote (clone on first pull, fetch + checkout on every one after). A rig
+with network access clones from GitHub instead and pulls data with ``--no-code`` —
+either way the code lands first, since ``ship pull`` runs through signalml itself.
 Planning refuses a dirty worktree unless ``--allow-dirty`` (which captures
 ``git diff HEAD`` alongside it): checkpoints record a git hash, so the rig must never
 run code that does not correspond to a commit.
