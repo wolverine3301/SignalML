@@ -10,7 +10,7 @@
 # re-running this script continues where things left off).
 #
 # Deliberately NOT included: launching training. The log ends with the exact
-# command — a multi-day GPU run should be started by a human.
+# command  -  a multi-day GPU run should be started by a human.
 
 param(
     [string]$DataRoot = $env:SIGNALML_DATA_ROOT,
@@ -69,22 +69,8 @@ Step "dataset build (full_acoustic_v1)" {
 }
 
 Step "community vocoder download (CC BY-NC - DEV PREVIEW ONLY, Q4)" {
-    $ckptDir = Join-Path $repo "third_party\DiffSinger\checkpoints"
-    $target = Join-Path $ckptDir "pc_nsf_hifigan_44.1k_hop512_128bin_2025.02"
-    if (Test-Path (Join-Path $target "model.ckpt")) { "already present"; return }
-    New-Item -ItemType Directory -Force $ckptDir | Out-Null
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $release = Invoke-RestMethod ("https://api.github.com/repos/openvpi/vocoders/" +
-        "releases/tags/pc-nsf-hifigan-44.1k-hop512-128bin-2025.02")
-    $asset = $release.assets | Where-Object { $_.name -match 'zip$' -and
-        $_.name -notmatch 'onnx|openutau|oudep' } | Select-Object -First 1
-    if (-not $asset) { "no suitable asset found: $($release.assets.name -join ', ')"; return }
-    "downloading $($asset.name) ($([math]::Round($asset.size / 1MB)) MB)"
-    $zip = Join-Path $env:TEMP $asset.name
-    Invoke-WebRequest $asset.browser_download_url -OutFile $zip
-    Expand-Archive $zip -DestinationPath $ckptDir -Force
-    Remove-Item $zip
-    Get-ChildItem $ckptDir -Recurse -Filter model.ckpt | Select-Object FullName
+    & powershell -ExecutionPolicy Bypass -File (
+        Join-Path $repo "scriptsetch_dev_vocoder.ps1")
 }
 
 Step "binarize (vendored trainer venv - validates IPA dictionary end-to-end, D3)" {

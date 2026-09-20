@@ -1,0 +1,52 @@
+# P7.5 overfit sanity run - the first thing the 5090 rig trains.
+#
+# Purpose is to validate the *data path*, not to make a good model: three singers
+# with the most clipped audio (~1.8 h), trained until it resings a training snippet
+# recognizably. It is also the D3 smoke test - if the vendored binarizer chokes on
+# IPA phoneme names, it chokes here, on a build that takes minutes to redo.
+#
+# Deviation from MIGRATION_PLAN P7.5, which specifies the dev profile: dev exists to
+# make iteration fast on an 8 GB card. On the rig that reason is gone, while dev
+# would cost the vocoder (the only 44.1 kHz checkpoint we have) and fork the mel
+# contract for a checkpoint that is throwaway anyway. So: prod, and the output is
+# listenable.
+#
+#   signalml dataset build --recipe configs/dataset.overfit.yaml
+name: overfit_v1
+trainer: acoustic
+profile: prod
+
+filters:
+  domain: sung
+  language: en
+  gender: F
+  min_align_score: 0.8
+  exclude_processing: [heavy]
+  corpora: []
+  exclude_corpora: []
+  # the three heaviest singers in full_acoustic_v1 (most clipped minutes)
+  singers:
+    - singer
+    - singer
+    - singer
+  min_singer_minutes: 0.0
+  ids: []
+
+segmentation:
+  split_gap_sec: 0.4
+  min_clip_sec: 2.0
+  max_clip_sec: 15.0
+  pad_sec: 0.15
+  inner_sp_min_sec: 0.05
+  drop_noise_clips: true
+
+test_clips_per_speaker: 4   # more held-out clips: this run exists to be listened to
+
+trainer_opts:
+  # 5090 (32 GB). Halve max_batch_frames first if it OOMs.
+  max_batch_frames: 80000
+  max_batch_size: 64
+  binarization_workers: 8
+  max_updates: 20000          # an overfit proof, not a model
+  val_check_interval: 500     # hear it early and often
+  num_ckpt_keep: 3

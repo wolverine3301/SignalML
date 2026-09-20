@@ -6,11 +6,26 @@ from signalml.cli import STAGES, main
 
 
 def test_stub_stage_reports_migration_phase(capsys):
-    rc = main(["train"])
+    rc = main(["sing"])
     assert rc == 2
     out = capsys.readouterr().out
     assert "not implemented" in out
-    assert "P7" in out
+    assert "P8" in out
+
+
+def test_train_dry_run_blocks_on_an_unbuilt_dataset(tmp_path, capsys):
+    rc = main(["train", "acoustic", "--dataset", "nope", "--data-root",
+               str(tmp_path), "--dry-run"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "BLOCKED" in err and "dataset build" in err
+
+
+def test_train_variance_names_its_blocker(tmp_path, capsys):
+    rc = main(["train", "variance", "--dataset", "nope", "--data-root",
+               str(tmp_path)])
+    assert rc == 2
+    assert "D1" in capsys.readouterr().err
 
 
 def test_align_cli_idle(tmp_path, capsys):
