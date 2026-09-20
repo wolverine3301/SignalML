@@ -26,7 +26,7 @@ STAGES: dict[str, tuple[str, str]] = {
 }
 
 _IMPLEMENTED = {"manifest", "acquire", "separate", "clean", "features", "align", "score",
-                "dataset"}
+                "dataset", "train"}
 
 
 def _cmd_manifest_scan(args: argparse.Namespace) -> int:
@@ -435,6 +435,54 @@ def _cmd_dataset_build(args: argparse.Namespace) -> int:
     for rid, reason in sorted(summary.skipped.items()):
         print(f"  SKIPPED {rid}: {reason}", file=sys.stderr)
     return 0 if summary.clips else 1
+
+
+def _cmd_train(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .train.runner import (
+        execute,
+        load_train_config,
+        plan_run,
+        preflight,
+        write_run_record,
+    )
+
+    cfg = load_train_config(args.train_config)
+    binarize = None
+    if args.skip_binarize:
+        binarize = False
+    elif args.force_binarize:
+        binarize = True
+    try:
+        plan = plan_run(
+            resolve_data_root(args.data_root),
+            args.dataset,
+            trainer=args.trainer,
+            exp_name=args.exp_name,
+            cfg=cfg,
+            binarize=binarize,
+            reset=args.reset,
+            hparams=args.hparams,
+        )
+    except NotImplementedError as exc:
+        print(f"train {args.trainer}: {exc}", file=sys.stderr)
+        return 2
+
+    problems = preflight(plan, cfg)
+    print(plan.describe())
+    for note in plan.notes:
+        print(f"  note: {note}")
+    for problem in problems:
+        print(f"  BLOCKED: {problem}", file=sys.stderr)
+    if problems:
+        return 1
+    if args.dry_run:
+        print("  (dry run — nothing launched)")
+        return 0
+
+    record = write_run_record(plan, probe=not args.no_probe)
+    print(f"  run record: {record}")
+    return execute(plan)
 
 
 def _cmd_studio_serve(args: argparse.Namespace) -> int:
@@ -943,6 +991,38 @@ def main(argv: list[str] | None = None) -> int:
     build_p.add_argument("--force", action="store_true",
                          help="rebuild an existing dataset directory")
     build_p.set_defaults(func=_cmd_dataset_build)
+
+    # train — wrap the vendored DiffSinger scripts (P7.3)
+    train_p = subparsers.add_parser(
+        "train", help="[P7] train acoustic/variance/vocoder models")
+    train_sub = train_p.add_subparsers(dest="trainer", required=True)
+    for trainer, blurb in (
+        ("acoustic", "phonemes + durations -> mel (the singing model)"),
+        ("variance", "durations + pitch (blocked on D1 note labels)"),
+        ("vocoder", "own NSF-HiFiGAN-class vocoder (blocked on P7.4 vendoring)"),
+    ):
+        tp = train_sub.add_parser(trainer, help=blurb)
+        tp.add_argument("--dataset", required=True,
+                        help="datasets/<name>/ built by `signalml dataset build`")
+        tp.add_argument("--data-root", default=None,
+                        help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+        tp.add_argument("--exp-name", default=None,
+                        help="trainer experiment name (default: the dataset name)")
+        tp.add_argument("--train-config", default=None,
+                        help="trainer wiring yaml (default: configs/train.yaml)")
+        tp.add_argument("--skip-binarize", action="store_true",
+                        help="never binarize, even when binary data is missing")
+        tp.add_argument("--force-binarize", action="store_true",
+                        help="binarize again even if binary data exists")
+        tp.add_argument("--reset", action="store_true",
+                        help="pass --reset: ignore the saved config in checkpoints/")
+        tp.add_argument("--hparams", default=None,
+                        help="passthrough hparams override, e.g. 'max_batch_size=32'")
+        tp.add_argument("--dry-run", action="store_true",
+                        help="preflight and print the commands, launch nothing")
+        tp.add_argument("--no-probe", action="store_true",
+                        help="skip the trainer-venv torch/CUDA probe in the run record")
+        tp.set_defaults(func=_cmd_train, trainer=trainer)
 
     # dash
     dash_p = subparsers.add_parser("dash", help="live pipeline monitoring dashboard")

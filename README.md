@@ -115,25 +115,64 @@ Dev happens on the laptop / work PC; prod training happens on the 5090 rig.
 over the LAN, hash-verified and resumable; `signalml doctor` preflights the receiving
 machine. Full design and gotchas: `docs/notes/transfer.md`.
 
+A rig with nothing on it takes the code first — `ship pull` runs *through* signalml,
+so it cannot be what delivers it:
+
 ```powershell
+# on the rig, from nothing
+git clone --recurse-submodules https://github.com/wolverine3301/SignalML.git D:\SignalML
+powershell -ExecutionPolicy Bypass -File D:\SignalML\scripts\bootstrap_rig.ps1 -DataRoot D:\DATA_ROOT -SetDataRootEnv
+
 # sender (holds DATA_ROOT) — plan a selection, then serve it
-signalml ship plan  --data-root Y:\DATA_ROOT --what rebuildable
-signalml ship serve --data-root Y:\DATA_ROOT --name full_acoustic_v1
+signalml ship plan  --data-root Y:\DATA_ROOT --what rebuildable --name corpus
+signalml ship serve --data-root Y:\DATA_ROOT --name corpus
 
 # receiver (the rig) — `serve` prints this line with the real address and token
-signalml ship pull http://10.0.0.144:8770/<token> --data-root D:\DATA_ROOT --repo-dir D:\SignalML
-powershell -ExecutionPolicy Bypass -File D:\SignalML\scripts\bootstrap_rig.ps1 -DataRoot D:\DATA_ROOT
+signalml ship pull http://10.0.0.144:8770/<token> --data-root D:\DATA_ROOT --no-code
 
 # before committing the GPU to a multi-day run
-signalml ship verify --data-root D:\DATA_ROOT --name full_acoustic_v1
+signalml ship verify --data-root D:\DATA_ROOT --name corpus
 signalml doctor      --data-root D:\DATA_ROOT
 ```
 
 `--what dataset` ships only `datasets/<name>/` (the trainer's input); `rebuildable`
 (default) ships `clean/` + `align/` for the songs the recipe selects, so the rig can
 rebuild datasets under new recipes without another transfer; `full` adds the stems.
-This repo has no git remote — the shipped git bundle *is* the rig's clone and its
-update path, and shipping refuses a dirty worktree so checkpoint git hashes stay honest.
+**Prefer `rebuildable` and rebuild the dataset on the rig**: a generated trainer config
+carries absolute paths from the machine that built it, and `signalml train` refuses a
+config whose dataset folders are not there.
+
+Shipping refuses a dirty worktree, so checkpoint git hashes stay honest. The
+`--with-code` git bundle remains the code path for a rig that cannot reach GitHub
+(clone from the bundle, then fetch it on later shipments).
+
+## Training (P7)
+
+```powershell
+# 1. build the dataset ON the rig, so its config carries rig-local paths
+signalml dataset build --recipe configs/dataset.overfit.yaml   # 3 singers, ~1.8 h
+# 2. the vocoder used for validation playback (CC BY-NC, dev preview only - Q4)
+powershell -ExecutionPolicy Bypass -File .\scripts\fetch_dev_vocoder.ps1
+# 3. preflight, then binarize + train with a run record
+signalml train acoustic --dataset overfit_v1 --dry-run         # look before leaping
+signalml train acoustic --dataset overfit_v1
+```
+
+`train` wraps the vendored DiffSinger scripts in their own venv (`configs/train.yaml`
+points at it) and refuses runs that would otherwise fail hours in: missing trainer
+venv, unbuilt dataset, a config from another machine, mel parameters matching no audio
+profile (D5), or `val_with_vocoder` with no vocoder checkpoint on disk. It binarizes
+when binary data is missing, then trains, and writes
+`<DATA_ROOT>/runs/<exp>/<timestamp>/run.json` — git hash, dataset-card hash, config +
+dictionary snapshot, the exact command line. Checkpoints land where the vendored
+trainer puts them: `third_party/DiffSinger/checkpoints/<exp>/`.
+
+Recipes: `configs/dataset.overfit.yaml` is the P7.5 sanity run (three singers, trained
+until it resings a training snippet); `configs/dataset.full_v2.yaml` is the first real
+multi-singer run (a floor of 5 clipped minutes per speaker). A recipe's `trainer_opts`
+sizes batches for the box — defaults fit 8 GB, the rig recipes are set for the 5090.
+`train variance` and `train vocoder` name their blockers (D1 note labels; P7.4
+SingingVocoders vendoring) instead of pretending.
 
 ## Layout
 
