@@ -1,0 +1,44 @@
+# The first real multi-singer acoustic run (MIGRATION_PLAN P7.6).
+#
+# full_acoustic_v1 with a speaker floor. v1 took every singer that cleared alignment:
+# 160 speakers, 111 of them under five minutes. Those extra speakers cost little in
+# backbone quality but they dominate the spk_id table the voice bank samples from -
+# an embedding fitted on two minutes renders as the corpus average, and the ECAPA
+# novelty guard then has nothing real to measure a sampled voice against
+# (ARCHITECTURE section 4). At 5.0 this selects ~49 singers / ~9.9 h / ~4.5k clips.
+#
+# v1 stays on disk: it is the control for "did the floor help?".
+#
+#   signalml dataset build --recipe configs/dataset.full_v2.yaml
+name: full_acoustic_v2
+trainer: acoustic
+profile: prod
+
+filters:
+  domain: sung
+  language: en
+  gender: F
+  min_align_score: 0.8
+  exclude_processing: [heavy]
+  corpora: []
+  exclude_corpora: []
+  singers: []
+  min_singer_minutes: 5.0   # measured on CLIPPED audio, not manifest duration
+  ids: []
+
+segmentation:
+  split_gap_sec: 0.4
+  min_clip_sec: 2.0
+  max_clip_sec: 15.0
+  pad_sec: 0.15
+  inner_sp_min_sec: 0.05
+  drop_noise_clips: true
+
+test_clips_per_speaker: 2
+
+trainer_opts:
+  # 5090 (32 GB). Halve max_batch_frames first if it OOMs.
+  max_batch_frames: 80000
+  max_batch_size: 64
+  binarization_workers: 8
+  num_ckpt_keep: 5
