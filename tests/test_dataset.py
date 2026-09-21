@@ -198,7 +198,10 @@ class TestBuild:
         for name in ("dataset.overfit.yaml", "dataset.full_v2.yaml"):
             r = load_dataset_recipe(CONFIGS_DIR / name)
             assert r.profile == "prod"  # the rig trains at prod, dev is throwaway
-            assert r.trainer_opts.max_batch_frames > 30000  # sized for the 5090
+        overfit_opts = load_dataset_recipe(CONFIGS_DIR / "dataset.overfit.yaml").trainer_opts
+        full_opts = load_dataset_recipe(CONFIGS_DIR / "dataset.full_v2.yaml").trainer_opts
+        # the overfit proof wants many small updates, the real run wants throughput
+        assert overfit_opts.max_batch_frames < full_opts.max_batch_frames
         overfit = load_dataset_recipe(CONFIGS_DIR / "dataset.overfit.yaml")
         assert len(overfit.filters.singers) == 3
         assert load_dataset_recipe(

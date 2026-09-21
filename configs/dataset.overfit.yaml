@@ -43,10 +43,14 @@ segmentation:
 test_clips_per_speaker: 4   # more held-out clips: this run exists to be listened to
 
 trainer_opts:
-  # 5090 (32 GB). Halve max_batch_frames first if it OOMs.
-  max_batch_frames: 80000
-  max_batch_size: 64
+  # max_batch_frames is FRAMES, and at prod (44.1 kHz / hop 512) one second is ~86 of
+  # them - so 80000 frames is ~15 minutes of audio in a single step. Measured on the
+  # rig (RTX 4090, 24 GB) 2026-09-20: 80000/64 ran at 0.26 steps/s and pinned 24 GB,
+  # one epoch every 8 steps; 20000/32 runs at 0.90 steps/s, 37 steps per epoch. For an
+  # overfit proof what matters is updates, not batch size, so small wins on both axes.
+  max_batch_frames: 20000     # ~3.9 min of audio per step
+  max_batch_size: 32
   binarization_workers: 8
   max_updates: 20000          # an overfit proof, not a model
-  val_check_interval: 500     # hear it early and often
+  val_check_interval: 500     # hear it early and often (~9 min apart at 0.9 steps/s)
   num_ckpt_keep: 3
