@@ -64,11 +64,13 @@ print('device', torch.cuda.get_device_name(0), torch.cuda.get_device_capability(
     $out = & $Interpreter -c $probe
     $out | ForEach-Object { Write-Host "    $_" }
     if ($LASTEXITCODE -ne 0) { throw "$Label torch has no CUDA  -  see README 'GPU install'" }
-    $cap = & $Interpreter -c "import torch;print('%d%d' % torch.cuda.get_device_capability(0))"
-    $archs = & $Interpreter -c "import torch;print(' '.join(torch.cuda.get_arch_list()))"
-    if ($archs -notmatch "sm_$cap") {
-        Write-Host ("    WARNING: device is sm_$cap but this wheel only has: $archs") -ForegroundColor Yellow
-        Write-Host ("             kernels will fail at launch; install from $cudaIndex") -ForegroundColor Yellow
+    # Not a string match: CUDA cubins are binary-compatible upward within a major
+    # generation, so an sm_86 wheel runs on an sm_89 card (4090 on cu128, which ships
+    # 75/80/86/90/100/120 and no 89). Only a missing generation is fatal.
+    $usable = & $Interpreter -c "import torch;c=torch.cuda.get_device_capability(0);a=[x[3:] for x in torch.cuda.get_arch_list() if x.startswith('sm_') and x[3:].isdigit()];print(int(any(int(d[:-1])==c[0] and int(d[-1])<=c[1] for d in a)))"
+    if ($usable.Trim() -ne "1") {
+        $archs = & $Interpreter -c "import torch;print(' '.join(torch.cuda.get_arch_list()))"
+        throw "$Label torch has no kernels for this GPU generation (built for: $archs) - install from $cudaIndex"
     }
 }
 
