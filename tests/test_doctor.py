@@ -7,6 +7,7 @@ a laptop with CPU wheels *should* report FAIL there — so those are not pinned.
 
 from __future__ import annotations
 
+from signalml import doctor
 from signalml.doctor import (
     Check,
     check_data_root,
@@ -68,3 +69,25 @@ def test_run_checks_covers_the_documented_surface(tmp_path):
     for expected in ("python", "uv", "git", "torch", "audio profile", "DATA_ROOT",
                      "disk space", "DiffSinger submodule"):
         assert expected in names
+
+class TestGpuArch:
+    """CUDA cubins are binary-compatible upward within a major generation: the cu128
+    wheels ship no sm_89, and a 4090 runs their sm_86 kernels (verified on the rig,
+    2026-09-20). An exact string match would fail every Ada card."""
+
+    ARCHS = ["sm_75", "sm_80", "sm_86", "sm_90", "sm_100", "sm_120"]
+
+    def test_exact_match(self):
+        assert doctor.check_gpu_arch((7, 5), self.ARCHS).status == "ok"
+
+    def test_same_generation_is_fine(self):
+        got = doctor.check_gpu_arch((8, 9), self.ARCHS)
+        assert got.status == "ok" and "sm_86" in got.detail
+
+    def test_missing_generation_fails(self):
+        got = doctor.check_gpu_arch((6, 1), self.ARCHS)
+        assert got.status == "fail" and "6.x" in got.detail
+
+    def test_three_digit_archs_parse(self):
+        assert doctor._parse_arch("sm_120") == (12, 0)
+        assert doctor._parse_arch("compute_80") is None

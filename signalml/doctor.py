@@ -106,6 +106,42 @@ def check_ffmpeg() -> Check:
 # ------------------------------------------------------------------------ torch
 
 
+def _parse_arch(arch: str) -> tuple[int, int] | None:
+    """'sm_86' -> (8, 6); 'sm_120' -> (12, 0). Non-sm entries (PTX) return None."""
+    digits = arch[3:] if arch.startswith("sm_") else ""
+    if not digits.isdigit() or len(digits) < 2:
+        return None
+    return int(digits[:-1]), int(digits[-1])
+
+
+def check_gpu_arch(cap: tuple[int, int], arch_list: list[str]) -> Check:
+    """Can this wheel actually emit code for this card?
+
+    Not a string match on ``sm_XY``: CUDA cubins are binary-compatible *upward
+    within a major generation*, so a wheel built for sm_86 runs on an sm_89 card
+    (a 4090 on the cu128 wheels, which ship 75/80/86/90/100/120 and no 89).
+    Only a missing *generation* is fatal.
+    """
+    want = f"sm_{cap[0]}{cap[1]}"
+    if not arch_list:
+        return Check("gpu arch supported", "warn", f"torch reports no built archs for {want}")
+    if want in arch_list:
+        return Check("gpu arch supported", "ok",
+                     f"{want} in {len(arch_list)} built archs")
+    usable = [a for a in arch_list
+              if (p := _parse_arch(a)) and p[0] == cap[0] and p[1] <= cap[1]]
+    if usable:
+        return Check("gpu arch supported", "ok",
+                     f"{want} runs {max(usable, key=lambda a: _parse_arch(a)[1])} cubins "
+                     f"(same generation, binary-compatible upward)")
+    return Check(
+        "gpu arch supported", "fail",
+        f"this torch was built for {', '.join(arch_list)} — nothing in the {cap[0]}.x "
+        f"generation, so it cannot run on {want}",
+        "swap in the cu128 wheels (README 'GPU install'); a plain `uv sync` "
+        "reverts them, so re-run the swap after every sync")
+
+
 def check_torch() -> list[Check]:
     try:
         torch = importlib.import_module("torch")
@@ -137,16 +173,7 @@ def check_torch() -> list[Check]:
                         f"{name} (sm_{cap[0]}{cap[1]}), {torch.cuda.device_count()} device(s)"))
 
     arch_list = getattr(torch.cuda, "get_arch_list", lambda: [])()
-    if arch_list and f"sm_{cap[0]}{cap[1]}" not in arch_list:
-        checks.append(Check(
-            "gpu arch supported", "fail",
-            f"this torch was built for {', '.join(arch_list)} — it cannot emit code "
-            f"for sm_{cap[0]}{cap[1]}",
-            "swap in the cu128 wheels (README 'GPU install'); a plain `uv sync` "
-            "reverts them, so re-run the swap after every sync"))
-    else:
-        checks.append(Check("gpu arch supported", "ok",
-                            f"sm_{cap[0]}{cap[1]} in {len(arch_list) or '?'} built archs"))
+    checks.append(check_gpu_arch(cap, arch_list))
 
     if cap < BLACKWELL:
         checks.append(Check(
@@ -252,12 +279,12 @@ def check_trainer_torch(venv: Path) -> Check:
         return Check(name, "fail",
                      f"{info['v']} in the trainer venv has no usable CUDA "
                      f"(cuda={info['cuda']}, available={info['avail']})", fix)
-    cap = f"sm_{info['cap'][0]}{info['cap'][1]}"
-    if info["archs"] and cap not in info["archs"]:
-        return Check(name, "fail",
-                     f"{info['v']} was built for {', '.join(info['archs'])} — no {cap} "
-                     f"kernels for {info['name']}", fix)
-    return Check(name, "ok", f"{info['v']} / {info['name']} ({cap})")
+    cap = tuple(info["cap"])
+    arch = check_gpu_arch(cap, info["archs"])
+    if arch.status == "fail":
+        return Check(name, "fail", f"{info['v']}: {arch.detail}", fix)
+    return Check(name, "ok",
+                 f"{info['v']} / {info['name']} (sm_{cap[0]}{cap[1]})")
 
 
 def check_audio_profiles() -> Check:
