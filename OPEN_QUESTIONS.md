@@ -30,6 +30,17 @@
   family lands, add the mapping table (`signalml/score/phoneset.py`) and bump the
   phone-set version — no architectural change needed.
 
+- **Our own note transcriber** (Logan, 2026-09-22): rather than depending on
+  openvpi's SOME/GAME weights, train the note-transcription model ourselves. Endorsed
+  as a project goal, not a blocker — the bake-off uses their weights meanwhile.
+  Tractable for the reason SOME states about itself (usable results from ~3 h of
+  labelled data, MIT training code), with one real obstacle: note transcription is
+  supervised and our aligned vocals carry no note labels. Four ways around
+  that, costed in `docs/notes/note_transcription.md` — bootstrap from openvpi labels
+  and hand-correct, an openly-licensed labelled corpus, synthetic supervision from our
+  own singer once P7 lands, or the F0+alignment heuristic as a clean floor. Our edge:
+  phone-level alignment we trust, so the boundary half of the problem is half-solved.
+
 - **One voice that talks, acts, and sings** (Logan's original 2020 vision, restated
   2026-07-13): the same persisted sampled voice renders plain speech, expressive
   voice-acting, and singing. The 2020 intuition — master the expressive extreme

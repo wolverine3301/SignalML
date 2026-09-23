@@ -22,7 +22,7 @@ _ASSETS = {
     "/netviz.js": ("netviz.js", "text/javascript; charset=utf-8"),
 }
 
-STAGE_FLAGS = list(StatusFlags.model_fields)  # separated, cleaned, aligned, featurized
+STAGE_FLAGS = list(StatusFlags.model_fields)  # separated, cleaned, aligned, featurized, transcribed
 
 
 def _analysis(data_root: Path, song_id: str) -> dict:

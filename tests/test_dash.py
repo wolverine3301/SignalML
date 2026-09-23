@@ -38,8 +38,10 @@ def test_build_status_shape(data_root):
     assert d["totals"] == {"songs": 1, "hours": pytest.approx(0.0, abs=0.01),
                            "singers": 1, "lyrics_pct": 100.0}
     stages = {s["name"]: s["done"] for s in d["stages"]}
+    # the dashboard derives its stage list from StatusFlags, so a new pipeline stage
+    # shows up here the moment the schema gains it (transcribe = S5b, D1)
     assert stages == {"scanned": 1, "separated": 1, "cleaned": 1,
-                      "aligned": 0, "featurized": 0}
+                      "aligned": 0, "featurized": 0, "transcribed": 0}
     assert d["singers"][0]["name"] == "alice"
     assert d["align_scores"] == [0.42]
     song = d["songs"][0]

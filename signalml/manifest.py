@@ -78,6 +78,9 @@ class StatusFlags(BaseModel):
     cleaned: bool = False
     aligned: bool = False
     featurized: bool = False
+    # S5b note labels (DECISION_POINTS D1). Absent in older manifests, hence the
+    # default: a record written before this stage existed reads as "not transcribed".
+    transcribed: bool = False
 
 
 class QualityInfo(BaseModel):
