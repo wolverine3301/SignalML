@@ -1,0 +1,25 @@
+# S5b transcribe - note labels for the variance model (DECISION_POINTS D1).
+#
+# The backend is an EXTERNAL tool with its own pins, run like MFA and the trainer:
+# its own environment, invoked by command, never imported. `command` is argv with
+# {wav} (the cleaned vocal stem) and {out} (where the tool should write) substituted
+# per song. Until D1 is decided the command is empty and the stage refuses to guess.
+#
+# SOME (openvpi, MIT, 9x realtime on CPU, superseded upstream by GAME):
+#   command: ["G:/tools/SOME/.venv/Scripts/python.exe", "G:/tools/SOME/infer.py",
+#             "--model", "G:/tools/SOME/ckpt/model.ckpt", "--wav", "{wav}",
+#             "--midi", "{out}"]
+#   output_name: notes.mid
+#
+# GAME (openvpi, MIT, successor; pins CUDA 12.9 so it wants the rig, not a laptop):
+#   command: [...]         # emits note csv directly
+#   output_name: notes.csv
+
+backend: some
+stem: vocals
+command: []
+output_name: notes.mid
+
+# Transcribers emit slivers at consonant onsets; these are not notes anyone sang.
+min_note_sec: 0.05
+timeout_sec: 600.0

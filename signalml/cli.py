@@ -17,6 +17,7 @@ STAGES: dict[str, tuple[str, str]] = {
     "clean": ("P3", "resample/loudness-normalize/filter vocal stems"),
     "align": ("P5", "MFA alignment -> align/phones.json (MFA IPA)"),
     "score": ("P6", "score JSON tools: validate / from-midi / phoneset"),
+    "transcribe": ("P5b", "note labels for the variance model (D1)"),
     "features": ("P4", "mel/F0/BPM/key feature extraction"),
     "dataset": ("P7", "build binarized training datasets from the manifest"),
     "train": ("P7", "train acoustic/variance/vocoder models"),
@@ -26,7 +27,7 @@ STAGES: dict[str, tuple[str, str]] = {
 }
 
 _IMPLEMENTED = {"manifest", "acquire", "separate", "clean", "features", "align", "score",
-                "dataset", "train"}
+                "dataset", "train", "transcribe"}
 
 
 def _cmd_manifest_scan(args: argparse.Namespace) -> int:
@@ -533,6 +534,24 @@ def _cmd_train_status(args: argparse.Namespace) -> int:
     else:
         print(format_status(summary))
     return 1 if summary.get("error") and not summary.get("step") else 0
+
+
+def _cmd_transcribe(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .stages.transcribe import load_transcribe_config, run
+
+    summary = run(
+        resolve_data_root(args.data_root),
+        cfg=load_transcribe_config(args.config),
+        force=args.force,
+        limit=args.limit,
+        ids=args.ids or None,
+    )
+    print(f"transcribe: {len(summary.transcribed)} song(s), "
+          f"{summary.notes_written} note(s), {len(summary.skipped)} skipped")
+    for rid, why in sorted(summary.failed.items()):
+        print(f"  FAILED {rid}: {why}", file=sys.stderr)
+    return 1 if summary.failed and not summary.transcribed else 0
 
 
 def _cmd_studio_serve(args: argparse.Namespace) -> int:
@@ -1114,6 +1133,21 @@ def main(argv: list[str] | None = None) -> int:
     status_p.add_argument("--json", action="store_true",
                           help="emit the full summary as JSON")
     status_p.set_defaults(func=_cmd_train_status)
+
+    # transcribe — S5b note labels (D1)
+    tr_p = subparsers.add_parser(
+        "transcribe", help="[P5b] note labels for the variance model (D1)")
+    tr_p.add_argument("--data-root", default=None,
+                      help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    tr_p.add_argument("--config", default=None,
+                      help="transcriber wiring yaml (default: configs/transcribe.yaml)")
+    tr_p.add_argument("--force", action="store_true",
+                      help="re-transcribe songs that already have notes")
+    tr_p.add_argument("--limit", type=int, default=None,
+                      help="stop after this many songs (bake-off sampling)")
+    tr_p.add_argument("--ids", nargs="*", default=None,
+                      help="explicit song ids instead of a manifest query")
+    tr_p.set_defaults(func=_cmd_transcribe)
 
     # dash
     dash_p = subparsers.add_parser("dash", help="live pipeline monitoring dashboard")
