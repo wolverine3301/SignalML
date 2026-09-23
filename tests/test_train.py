@@ -138,13 +138,22 @@ class TestPlan:
         plan = plan_run(root, "ds1", cfg=_cfg(trainer), binarize=False)
         assert any("will fail immediately" in n for n in plan.notes)
 
-    def test_variance_and_vocoder_are_blocked_with_reasons(self, tmp_path):
+    def test_vocoder_is_blocked_with_a_reason(self, tmp_path):
         trainer = _trainer_tree(tmp_path)
         root, _ = _dataset(tmp_path)
-        with pytest.raises(NotImplementedError, match="D1"):
-            plan_run(root, "ds1", trainer="variance", cfg=_cfg(trainer))
         with pytest.raises(NotImplementedError, match="SingingVocoders"):
             plan_run(root, "ds1", trainer="vocoder", cfg=_cfg(trainer))
+
+    def test_variance_uses_its_own_config_and_says_when_it_is_missing(self, tmp_path):
+        """D1 landed: variance is no longer refused outright, it just needs the
+        config `dataset variance-config` writes."""
+        trainer = _trainer_tree(tmp_path)
+        root, ds = _dataset(tmp_path)
+        cfg = _cfg(trainer)
+        plan = plan_run(root, "ds1", trainer="variance", cfg=cfg)
+        assert plan.config_path == ds / "config_variance.yaml"
+        problems = preflight(plan, cfg)
+        assert any("dataset build" in p for p in problems)
 
 
 class TestPreflight:

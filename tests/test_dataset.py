@@ -20,6 +20,7 @@ from signalml.stages.dataset import (
     build,
     load_dataset_recipe,
     segment_phones,
+    write_variance_config,
 )
 
 DEV_SR = active_profile("dev").sample_rate
@@ -101,6 +102,81 @@ class TestSegmentPhones:
         phones = [{"ph": "aj", "start": 1.0, "end": 1.2}]
         clips, dropped = segment_phones(phones, SEG, audio_len_sec=4.0)
         assert clips == [] and dropped == 1
+
+
+
+class TestVarianceConfig:
+    """A variance dataset IS the acoustic dataset plus columns, so this writes a
+    config rather than copying audio — and refuses when the columns are not there."""
+
+    def _built(self, tmp_path, make_wav, *, notes=False):
+        root = tmp_path / "dr"
+        _ready_song(root, make_wav)
+        summary = build(root, recipe=recipe())
+        if notes:
+            for folder in summary.out_dir.glob("*-en"):
+                path = folder / "transcriptions.csv"
+                rows = list(csv.DictReader(path.read_text(encoding="utf-8").splitlines()))
+                with open(path, "w", newline="", encoding="utf-8") as fh:
+                    w = csv.DictWriter(fh, fieldnames=[*rows[0], "note_seq", "note_dur"])
+                    w.writeheader()
+                    for row in rows:
+                        total = sum(float(d) for d in row["ph_dur"].split())
+                        w.writerow({**row, "note_seq": "rest C4+12",
+                                    "note_dur": f"0.1 {total - 0.1:.6f}"})
+        return summary.out_dir
+
+    def test_writes_a_config_that_extends_the_acoustic_one(self, tmp_path, make_wav):
+        out = self._built(tmp_path, make_wav, notes=True)
+        got = write_variance_config(out)
+        config = yaml.safe_load(got.path.read_text(encoding="utf-8"))
+
+        assert config["base_config"] == ["configs/variance.yaml"]
+        assert config["predict_dur"] is True and config["predict_pitch"] is True
+        # same raw data, different binarized output: different binarizer, different
+        # tensors, and one directory for both would silently mix them
+        acoustic = yaml.safe_load((out / "config_acoustic.yaml").read_text(encoding="utf-8"))
+        assert config["datasets"] == acoustic["datasets"]
+        assert config["binary_data_dir"] != acoustic["binary_data_dir"]
+        # the audio contract is inherited, never re-derived (D5)
+        for key in ("audio_sample_rate", "hop_size", "fft_size", "win_size"):
+            assert config[key] == acoustic[key]
+        # features needing the NN harmonic-noise separator stay off
+        assert config["predict_breathiness"] is False
+        assert config["predict_voicing"] is False
+
+    def test_refuses_pitch_without_note_columns(self, tmp_path, make_wav):
+        out = self._built(tmp_path, make_wav, notes=False)
+        with pytest.raises(RuntimeError, match="note_seq"):
+            write_variance_config(out)
+
+    def test_duration_only_works_without_notes(self, tmp_path, make_wav):
+        """Their own table: duration prediction needs ph_num, not note_seq."""
+        out = self._built(tmp_path, make_wav, notes=False)
+        got = write_variance_config(out, predict_pitch=False)
+        config = yaml.safe_load(got.path.read_text(encoding="utf-8"))
+        assert config["predict_pitch"] is False and config["predict_dur"] is True
+
+    def test_refuses_to_clobber_without_force(self, tmp_path, make_wav):
+        out = self._built(tmp_path, make_wav, notes=True)
+        write_variance_config(out)
+        with pytest.raises(FileExistsError):
+            write_variance_config(out)
+        assert write_variance_config(out, force=True).path.exists()
+
+    def test_unbuilt_dataset_points_at_dataset_build(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="dataset build"):
+            write_variance_config(tmp_path / "nope")
+
+    def test_trainer_opts_size_the_run(self, tmp_path, make_wav):
+        out = self._built(tmp_path, make_wav, notes=True)
+        from signalml.stages.dataset import TrainerOpts
+        got = write_variance_config(out, trainer_opts=TrainerOpts(
+            max_batch_frames=40000, max_batch_size=24, permanent_ckpt_start=2000,
+            permanent_ckpt_interval=2000))
+        config = yaml.safe_load(got.path.read_text(encoding="utf-8"))
+        assert config["max_batch_frames"] == 40000
+        assert config["permanent_ckpt_start"] == 2000
 
 
 class TestBuild:

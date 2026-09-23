@@ -174,8 +174,24 @@ Recipes: `configs/dataset.overfit.yaml` is the P7.5 sanity run (three singers, t
 until it resings a training snippet); `configs/dataset.full_v2.yaml` is the first real
 multi-singer run (a floor of 5 clipped minutes per speaker). A recipe's `trainer_opts`
 sizes batches for the box — defaults fit 8 GB, the rig recipes are set for the 5090.
-`train variance` and `train vocoder` name their blockers (D1 note labels; P7.4
-SingingVocoders vendoring) instead of pretending.
+`train vocoder` still names its blocker (P7.4: openvpi/SingingVocoders is not
+vendored) instead of pretending.
+
+**Variance** (durations + pitch) needs note labels, which is D1 —
+`docs/notes/note_transcription.md`. The path, all CPU except the training itself:
+
+```powershell
+signalml transcribe --config configs\transcribe.local.yaml --limit 5   # bake-off
+# label a built dataset in place (SOME's dataset mode writes note_seq/note_dur):
+#   batch_infer.py --model <ckpt> --dataset <dataset>\<singer>-en --overwrite
+signalml dataset variance-config --dataset overfit_v1 --recipe configs\dataset.overfit.yaml
+signalml train variance --dataset overfit_v1 --dry-run
+```
+
+`variance-config` writes `config_variance.yaml` beside the acoustic one — same wavs,
+same transcriptions.csv, its own `binary_data_dir` — and refuses if the note columns
+are missing, naming the folders. `--no-pitch` generates a duration-only run, which
+needs `ph_num` but no notes.
 
 Watch a run — from the rig, over SSH, or from a phone:
 
