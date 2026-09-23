@@ -8,6 +8,10 @@ produced the run, and hands off to their `binarize.py` / `train.py` in their own
 
 Their conventions, adopted as-is:
 
+``trainer="variance"`` looks for ``config_variance.yaml``, which
+``signalml dataset variance-config`` writes beside the acoustic one (D1, 2026-09-22);
+preflight reports its absence like any other missing config.
+
 - the trainer runs with ``cwd = third_party/DiffSinger`` (``base_config`` and
   ``vocoder_ckpt`` paths in their configs are relative to it), and
 - checkpoints land in ``checkpoints/<exp_name>`` *inside the submodule*.
@@ -139,12 +143,6 @@ def plan_run(
     now: _dt.datetime | None = None,
 ) -> TrainPlan:
     """Resolve a built dataset into the two commands that train it."""
-    if trainer == "variance":
-        raise NotImplementedError(
-            "variance training needs note_seq/note_dur in transcriptions.csv — "
-            "blocked on DECISION_POINTS D1 (note-annotation bake-off). Acoustic runs "
-            "resynthesize with ground-truth durations in the meantime."
-        )
     if trainer == "vocoder":
         raise NotImplementedError(
             "own-vocoder training lives in openvpi/SingingVocoders, not yet vendored "

@@ -114,13 +114,18 @@ so that P7's first real checkpoint meets finished plumbing.
 **Done when:** one command turns (score.json, voice, backing track) into a mixed WAV, with
 the model call behind an injectable backend.
 
-### A5. S5b "transcribe" stage skeleton (D1)
+### A5. S5b "transcribe" stage skeleton (D1) ✅ DONE 2026-09-22
 
-The note-annotation gap is the biggest unplanned hole. The *bake-off* needs the corpus, but
-the stage — manifest-driven job, injectable backend, config YAML, offline tests — follows the
-pattern demonstrated four times (acquire/separate/clean/features).
-**Also delegable:** verify current maintenance state of openvpi SOME / ROSVOT and write it up.
-**Done when:** the stage runs end-to-end on a fixture with a fake transcriber backend.
+Built, plus more than the item asked for: `signalml transcribe` (manifest-driven,
+injectable backend, 15 offline tests), `ph_num` in S6b, `signalml dataset
+variance-config`, and the first bake-off — SOME over five real songs on CPU, mean note
+coverage 0.950. Maintenance state checked as asked, and it had moved: SOME is superseded
+by **GAME**, and SOME's *weights* are CC BY-NC-SA 4.0 while its code is MIT. Logan's call
+recorded. Full write-up: `docs/notes/note_transcription.md`. D1 is now 🟡, and Logan's own
+note transcriber is an endorsed direction in OPEN_QUESTIONS.
+
+**What is left for variance training:** notes over a whole dataset (SOME's `batch_infer.py`,
+~2 clips/s on CPU) then `signalml train variance`.
 
 ### A6. Pipeline performance instrumentation
 

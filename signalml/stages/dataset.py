@@ -624,3 +624,135 @@ def _write_card(
         "",
     ]
     (out_dir / "dataset_card.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+# --------------------------------------------------------------- variance config
+
+# Their binarizer reads these by name from transcriptions.csv. ph_num is always
+# needed; the note columns only when pitch is predicted (docs/BestPractices.md).
+VARIANCE_COLUMNS = ("name", "ph_seq", "ph_dur", "ph_num")
+PITCH_COLUMNS = ("note_seq", "note_dur")
+
+
+@dataclass
+class VarianceConfig:
+    path: Path
+    speakers: int
+    predict_dur: bool
+    predict_pitch: bool
+    binary_data_dir: Path
+
+
+def _csv_columns(folder: Path) -> list[str]:
+    csv_path = folder / "transcriptions.csv"
+    if not csv_path.exists():
+        return []
+    with open(csv_path, newline="", encoding="utf-8") as fh:
+        return next(csv.reader(fh), [])
+
+
+def write_variance_config(
+    dataset_dir: str | Path,
+    *,
+    predict_dur: bool = True,
+    predict_pitch: bool = True,
+    trainer_opts: TrainerOpts | None = None,
+    force: bool = False,
+) -> VarianceConfig:
+    """Generate a variance trainer config beside an existing acoustic dataset.
+
+    A variance dataset *is* the acoustic dataset - same wavs, same transcriptions.csv,
+    extra columns - so this writes a config rather than copying 4 GB of audio
+    (their BestPractices: "extend an acoustic dataset"). The binarized output must
+    still go somewhere of its own: different binarizer, different tensors.
+
+    The acoustic config is the input, not the recipe: it records what was actually
+    built, and by the time notes are transcribed the recipe may have moved on.
+    """
+    dataset_dir = Path(dataset_dir)
+    acoustic_path = dataset_dir / "config_acoustic.yaml"
+    if not acoustic_path.exists():
+        raise FileNotFoundError(
+            f"{acoustic_path} not found — build the acoustic dataset first: "
+            f"signalml dataset build --recipe configs/dataset.<recipe>.yaml")
+    acoustic = yaml.safe_load(acoustic_path.read_text(encoding="utf-8")) or {}
+    out_path = dataset_dir / "config_variance.yaml"
+    if out_path.exists() and not force:
+        raise FileExistsError(f"{out_path} exists — rewrite it with --force")
+
+    problems: list[str] = []
+    for entry in acoustic.get("datasets", []):
+        folder = Path(entry["raw_data_dir"])
+        columns = _csv_columns(folder)
+        if not columns:
+            problems.append(f"{folder.name}: no transcriptions.csv")
+            continue
+        missing = [c for c in VARIANCE_COLUMNS if c not in columns]
+        if missing:
+            problems.append(f"{folder.name}: missing {missing} — rebuild the dataset "
+                            f"(ph_num arrived 2026-09-22)")
+        if predict_pitch:
+            no_notes = [c for c in PITCH_COLUMNS if c not in columns]
+            if no_notes:
+                problems.append(
+                    f"{folder.name}: missing {no_notes} — run the transcriber over "
+                    f"this dataset (SOME batch_infer.py, docs/notes/note_transcription.md) "
+                    f"or generate the config with predict_pitch off")
+    if problems:
+        raise RuntimeError("variance config refused:\n  " + "\n  ".join(problems))
+
+    opts = trainer_opts or TrainerOpts()
+    config = {
+        "base_config": ["configs/variance.yaml"],
+        "dictionaries": acoustic.get("dictionaries", {}),
+        "extra_phonemes": acoustic.get("extra_phonemes", []),
+        "merged_phoneme_groups": acoustic.get("merged_phoneme_groups", []),
+        "datasets": acoustic.get("datasets", []),
+        # its own binary dir: the variance binarizer writes different tensors, and
+        # pointing both at one directory silently mixes them
+        "binary_data_dir": (dataset_dir / "binary_variance").resolve().as_posix(),
+        "binarization_args": {"num_workers": opts.binarization_workers},
+        "pe": acoustic.get("pe", opts.pe),
+        "hnsep": acoustic.get("hnsep", opts.hnsep),
+        "use_lang_id": acoustic.get("use_lang_id", False),
+        "num_lang": acoustic.get("num_lang", 1),
+        "use_spk_id": acoustic.get("use_spk_id", True),
+        "num_spk": acoustic.get("num_spk", 1),
+        # the audio contract follows the acoustic dataset it extends (D5)
+        "audio_sample_rate": acoustic.get("audio_sample_rate"),
+        "hop_size": acoustic.get("hop_size"),
+        "fft_size": acoustic.get("fft_size"),
+        "win_size": acoustic.get("win_size"),
+        "predict_dur": predict_dur,
+        "predict_pitch": predict_pitch,
+        # the three that need breathiness/voicing/tension features stay off: they
+        # would drag in the NN harmonic-noise separator we deliberately avoid
+        "predict_energy": False,
+        "predict_breathiness": False,
+        "predict_voicing": False,
+        "predict_tension": False,
+        "max_batch_frames": opts.max_batch_frames,
+        "max_batch_size": opts.max_batch_size,
+    }
+    for key, value in (("max_updates", opts.max_updates),
+                       ("val_check_interval", opts.val_check_interval),
+                       ("num_ckpt_keep", opts.num_ckpt_keep),
+                       ("permanent_ckpt_start", opts.permanent_ckpt_start),
+                       ("permanent_ckpt_interval", opts.permanent_ckpt_interval)):
+        if value is not None:
+            config[key] = value
+    config.update(opts.extra)
+
+    out_path.write_text(
+        "# GENERATED by `signalml dataset variance-config` — edit the recipe, not\n"
+        "# this file. It extends the acoustic dataset in this directory: same\n"
+        "# wavs, same transcriptions.csv, its own binary_data_dir.\n"
+        + yaml.safe_dump(config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8")
+    return VarianceConfig(
+        path=out_path,
+        speakers=len(config["datasets"]),
+        predict_dur=predict_dur,
+        predict_pitch=predict_pitch,
+        binary_data_dir=Path(config["binary_data_dir"]),
+    )

@@ -554,6 +554,31 @@ def _cmd_transcribe(args: argparse.Namespace) -> int:
     return 1 if summary.failed and not summary.transcribed else 0
 
 
+def _cmd_dataset_variance_config(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .stages.dataset import load_dataset_recipe, write_variance_config
+
+    data_root = resolve_data_root(args.data_root)
+    recipe = load_dataset_recipe(args.recipe) if args.recipe else None
+    try:
+        got = write_variance_config(
+            data_root / "datasets" / args.dataset,
+            predict_dur=not args.no_dur,
+            predict_pitch=not args.no_pitch,
+            trainer_opts=recipe.trainer_opts if recipe else None,
+            force=args.force,
+        )
+    except (FileNotFoundError, FileExistsError, RuntimeError) as exc:
+        print(f"variance-config: {exc}", file=sys.stderr)
+        return 1
+    print(f"wrote {got.path}")
+    print(f"  {got.speakers} speaker(s)  predict_dur={got.predict_dur}  "
+          f"predict_pitch={got.predict_pitch}")
+    print(f"  binary data -> {got.binary_data_dir}")
+    print(f"  next: signalml train variance --dataset {args.dataset}")
+    return 0
+
+
 def _cmd_studio_serve(args: argparse.Namespace) -> int:
     from .manifest import resolve_data_root
     from .studio.server import serve
@@ -1088,6 +1113,23 @@ def main(argv: list[str] | None = None) -> int:
     build_p.add_argument("--force", action="store_true",
                          help="rebuild an existing dataset directory")
     build_p.set_defaults(func=_cmd_dataset_build)
+
+    var_p = dataset_sub.add_parser(
+        "variance-config",
+        help="write config_variance.yaml beside a built acoustic dataset (D1)")
+    var_p.add_argument("--dataset", required=True, help="datasets/<name>/ to extend")
+    var_p.add_argument("--data-root", default=None,
+                       help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    var_p.add_argument("--recipe", default=None,
+                       help="recipe yaml whose trainer_opts size the run "
+                            "(default: the vendored config's own values)")
+    var_p.add_argument("--no-pitch", action="store_true",
+                       help="duration prediction only — no note_seq/note_dur needed")
+    var_p.add_argument("--no-dur", action="store_true",
+                       help="pitch prediction only")
+    var_p.add_argument("--force", action="store_true",
+                       help="overwrite an existing config_variance.yaml")
+    var_p.set_defaults(func=_cmd_dataset_variance_config)
 
     # train — wrap the vendored DiffSinger scripts (P7.3)
     train_p = subparsers.add_parser(

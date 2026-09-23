@@ -21,11 +21,18 @@ def test_train_dry_run_blocks_on_an_unbuilt_dataset(tmp_path, capsys):
     assert "BLOCKED" in err and "dataset build" in err
 
 
-def test_train_variance_names_its_blocker(tmp_path, capsys):
+def test_train_variance_asks_for_its_config(tmp_path, capsys):
+    """D1 landed 2026-09-22: variance is no longer refused, it needs a config."""
     rc = main(["train", "variance", "--dataset", "nope", "--data-root",
-               str(tmp_path)])
+               str(tmp_path), "--dry-run"])
+    assert rc == 1
+    assert "config_variance.yaml" in capsys.readouterr().err
+
+
+def test_train_vocoder_names_its_blocker(tmp_path, capsys):
+    rc = main(["train", "vocoder", "--dataset", "nope", "--data-root", str(tmp_path)])
     assert rc == 2
-    assert "D1" in capsys.readouterr().err
+    assert "SingingVocoders" in capsys.readouterr().err
 
 
 def test_align_cli_idle(tmp_path, capsys):
