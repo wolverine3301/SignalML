@@ -22,10 +22,12 @@ Audio parameters come from `configs/audio.yaml` profiles (`dev` 22.05 kHz for fa
 testing, `prod` 44.1 kHz for real training) — select with `SIGNALML_AUDIO_PROFILE` or a
 `--profile` flag on stages. Never hardcode sample rates.
 
-## GPU install (RTX 5090 training rig)
+## GPU install (the training rig)
 
-The `train` extra installs Demucs + CPU torch wheels (PyPI default on Windows). On the
-5090 rig, swap in CUDA 12.8 wheels after syncing — Blackwell (sm_120) needs cu128:
+The `train` extra installs Demucs + CPU torch wheels (PyPI default on Windows). On a
+GPU box, swap in CUDA 12.8 wheels after syncing — Blackwell (sm_120) needs cu128, and
+the same wheels cover Ada (sm_89, the RTX 4090 the rig actually has) through
+generation-level cubin compatibility:
 
 ```powershell
 python -m uv sync --extra train
@@ -110,7 +112,8 @@ python -m uv run signalml score validate score.json
 
 ## Moving a corpus to the training rig
 
-Dev happens on the laptop / work PC; prod training happens on the 5090 rig.
+Dev happens on the laptop / work PC; prod training happens on the rig (currently a
+borrowed RTX 4090 — see `docs/notes/rig_session_2026-09-20.md`).
 `signalml ship` transfers a *selected* corpus plus the exact commit that produced it
 over the LAN, hash-verified and resumable; `signalml doctor` preflights the receiving
 machine. Full design and gotchas: `docs/notes/transfer.md`.
@@ -173,6 +176,19 @@ multi-singer run (a floor of 5 clipped minutes per speaker). A recipe's `trainer
 sizes batches for the box — defaults fit 8 GB, the rig recipes are set for the 5090.
 `train variance` and `train vocoder` name their blockers (D1 note labels; P7.4
 SingingVocoders vendoring) instead of pretending.
+
+Watch a run — from the rig, over SSH, or from a phone:
+
+```powershell
+signalml train status --exp overfit_v1                 # steps, losses, checkpoints
+signalml train status --exp overfit_v1 --audio .\out   # + newest validation renders
+```
+
+It reads the trainer's TensorBoard event files (through the trainer's own venv) and
+reports the latest step and loss, the step where validation actually **bottomed**, and
+whether a checkpoint still exists at that step — `num_ckpt_keep` is a rolling window,
+so a run that peaks early silently deletes its best result. Set
+`trainer_opts.permanent_ckpt_start` / `_interval` in the recipe to keep a ladder.
 
 ## Layout
 

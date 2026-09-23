@@ -521,6 +521,20 @@ def _cmd_train(args: argparse.Namespace) -> int:
     return execute(plan)
 
 
+def _cmd_train_status(args: argparse.Namespace) -> int:
+    import json as _json
+
+    from .train.status import collect, format_status, load_train_config
+
+    summary = collect(args.exp, cfg=load_train_config(args.train_config),
+                      audio_out=args.audio)
+    if args.json:
+        print(_json.dumps(summary, indent=2))
+    else:
+        print(format_status(summary))
+    return 1 if summary.get("error") and not summary.get("step") else 0
+
+
 def _cmd_studio_serve(args: argparse.Namespace) -> int:
     from .manifest import resolve_data_root
     from .studio.server import serve
@@ -1087,6 +1101,19 @@ def main(argv: list[str] | None = None) -> int:
         tp.add_argument("--no-probe", action="store_true",
                         help="skip the trainer-venv torch/CUDA probe in the run record")
         tp.set_defaults(func=_cmd_train, trainer=trainer)
+
+    status_p = train_sub.add_parser(
+        "status", help="steps, losses, best-validation step and checkpoints on disk")
+    status_p.add_argument("--exp", required=True,
+                          help="experiment name (the dataset name, unless --exp-name "
+                               "was passed to the run)")
+    status_p.add_argument("--train-config", default=None,
+                          help="trainer wiring yaml (default: configs/train.yaml)")
+    status_p.add_argument("--audio", default=None,
+                          help="directory to write the newest validation audio into")
+    status_p.add_argument("--json", action="store_true",
+                          help="emit the full summary as JSON")
+    status_p.set_defaults(func=_cmd_train_status)
 
     # dash
     dash_p = subparsers.add_parser("dash", help="live pipeline monitoring dashboard")

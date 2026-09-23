@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+from pathlib import Path
 
 import pytest
 import yaml
 
 from signalml.config import active_profile
+from signalml.train import status
 from signalml.train.runner import (
     TrainConfig,
     execute,
@@ -252,3 +254,107 @@ class TestExecute:
 
         assert execute(plan, runner=fake) == 3
         assert len(calls) == 1  # train never launched
+
+
+class TestStatus:
+    """`train status` answers "where is it" and "is the good checkpoint still there".
+
+    The probe runs in the trainer venv, so the subprocess is injected: these tests
+    assert how we call it and what we make of its answer, never tensorboard itself.
+    """
+
+    def _probe(self, **over):
+        probe = {
+            "exp_dir": "/exp",
+            "event_file": "events.out.tfevents.1",
+            "event_age_sec": 12,
+            "checkpoints": [
+                {"name": "model_ckpt_steps_3000.ckpt", "step": 3000, "bytes": 10 ** 9},
+                {"name": "model_ckpt_steps_4000.ckpt", "step": 4000, "bytes": 10 ** 9},
+            ],
+            "scalars": {
+                "training/mel_loss": [[1000, 0.9, 100.0], [4000, 0.3, 400.0]],
+                "validation/total_loss": [[1000, 0.6, 110.0], [3000, 0.2, 300.0],
+                                          [4000, 0.5, 400.0]],
+            },
+            "audio": [],
+        }
+        probe.update(over)
+        return probe
+
+    def _runner(self, probe, calls=None):
+        class Done:
+            returncode = 0
+            stdout = json.dumps(probe)
+            stderr = ""
+
+        def fake(cmd, **kwargs):
+            if calls is not None:
+                calls.append((cmd, kwargs))
+            return Done()
+
+        return fake
+
+    def test_reports_step_rate_and_best_validation(self, tmp_path):
+        trainer = _trainer_tree(tmp_path)
+        s = status.collect("ds1", cfg=_cfg(trainer),
+                           runner=self._runner(self._probe()))
+        assert s["step"] == 4000
+        assert s["steps_per_sec"] == 10.0  # 3000 steps over 300 wall seconds
+        # the minimum, not the last value — a run that overfits ends above its best
+        assert s["best"]["step"] == 3000 and s["best"]["value"] == 0.2
+        assert s["best"]["latest_value"] == 0.5
+        assert s["best"]["checkpoint_present"] is True
+
+    def test_flags_a_best_checkpoint_that_was_rolled_off(self, tmp_path):
+        """The 2026-09-20 case: val bottomed at 3000, num_ckpt_keep kept 19-20k."""
+        trainer = _trainer_tree(tmp_path)
+        probe = self._probe(checkpoints=[
+            {"name": "model_ckpt_steps_4000.ckpt", "step": 4000, "bytes": 10 ** 9}])
+        s = status.collect("ds1", cfg=_cfg(trainer), runner=self._runner(probe))
+        assert s["best"]["checkpoint_present"] is False
+        assert "rolling window" in status.format_status(s)
+
+    def test_no_warning_before_the_first_checkpoint_exists(self, tmp_path):
+        trainer = _trainer_tree(tmp_path)
+        probe = self._probe(checkpoints=[])
+        s = status.collect("ds1", cfg=_cfg(trainer), runner=self._runner(probe))
+        assert "rolling window" not in status.format_status(s)
+
+    def test_falls_back_to_mel_loss_when_total_is_absent(self, tmp_path):
+        trainer = _trainer_tree(tmp_path)
+        probe = self._probe(scalars={"validation/mel_loss": [[500, 0.3, 50.0],
+                                                             [1000, 0.1, 90.0]]})
+        s = status.collect("ds1", cfg=_cfg(trainer), runner=self._runner(probe))
+        assert s["best"]["metric"] == "validation/mel_loss" and s["best"]["step"] == 1000
+
+    def test_probe_runs_in_the_trainer_venv_over_stdin(self, tmp_path):
+        trainer = _trainer_tree(tmp_path)
+        calls = []
+        status.collect("ds1", cfg=_cfg(trainer), audio_out=tmp_path / "wavs",
+                       runner=self._runner(self._probe(), calls))
+        (cmd, kwargs), = calls
+        assert cmd[0].endswith("python.exe") and cmd[1] == "-"  # script over stdin
+        assert cmd[2].endswith(str(Path("checkpoints") / "ds1"))
+        assert "EventAccumulator" in kwargs["input"]
+        assert kwargs["env"]["SIGNALML_AUDIO_OUT"] == str(tmp_path / "wavs")
+        assert kwargs["env"]["PYTHONUTF8"] == "1"  # IPA-safe, like the trainer itself
+
+    def test_probe_failure_is_reported_not_swallowed(self, tmp_path):
+        trainer = _trainer_tree(tmp_path)
+
+        class Failed:
+            returncode = 1
+            stdout = ""
+            stderr = "ModuleNotFoundError: tensorboard"
+
+        s = status.collect("ds1", cfg=_cfg(trainer), runner=lambda cmd, **k: Failed())
+        assert "tensorboard" in s["error"]
+        assert "tensorboard" in status.format_status(s)
+
+    def test_no_event_files_yet_reads_as_a_note(self, tmp_path):
+        trainer = _trainer_tree(tmp_path)
+        probe = {"exp_dir": "/exp", "error": "no event files yet", "scalars": {},
+                 "checkpoints": [], "audio": []}
+        s = status.collect("ds1", cfg=_cfg(trainer), runner=self._runner(probe))
+        assert s["step"] == 0 and "no event files" in status.format_status(s)

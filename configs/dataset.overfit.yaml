@@ -48,9 +48,18 @@ trainer_opts:
   # rig (RTX 4090, 24 GB) 2026-09-20: 80000/64 ran at 0.26 steps/s and pinned 24 GB,
   # one epoch every 8 steps; 20000/32 runs at 0.90 steps/s, 37 steps per epoch. For an
   # overfit proof what matters is updates, not batch size, so small wins on both axes.
+  # FLOOR: max_batch_frames must exceed the largest single clip, or the trainer
+  # asserts before step 1 - "sentence at index N of size 7167 exceeds
+  # max_batch_samples limit of 6000". A 15 s clip (segmentation.max_clip_sec) costs
+  # ~7200 by their measure, so anything under ~8000 refuses to start on this corpus.
   max_batch_frames: 20000     # ~3.9 min of audio per step
   max_batch_size: 32
   binarization_workers: 8
-  max_updates: 20000          # an overfit proof, not a model
-  val_check_interval: 500     # hear it early and often (~9 min apart at 0.9 steps/s)
-  num_ckpt_keep: 3
+  # Measured 2026-09-20: 20000 steps took 64 min on the 4090, and validation had
+  # already bottomed at step 3000 - everything after that was memorization. 8000 is
+  # past the peak with room to see the curve turn, in ~25 min.
+  max_updates: 8000
+  val_check_interval: 500
+  num_ckpt_keep: 3            # rolling, for resume
+  permanent_ckpt_start: 1000  # + every 1000: ~8 kept checkpoints, ~6.8 GB
+  permanent_ckpt_interval: 1000

@@ -109,7 +109,15 @@ class TrainerOpts(BaseModel):
     val_with_vocoder: bool | None = None
     max_updates: int | None = None      # None = their config's value
     val_check_interval: int | None = None
+    # num_ckpt_keep is a ROLLING window: the last N checkpoints, nothing else. A run
+    # whose validation loss bottoms early (overfit_v1 hit its best at step 3000 of
+    # 20000 on 2026-09-20) deletes the good checkpoint long before it finishes. The
+    # permanent_* pair is their answer - every Nth checkpoint from `start` is kept
+    # regardless - and their defaults (80000/20000) only bite in runs far longer than
+    # ours. Cost is disk: an acoustic checkpoint is ~850 MB.
     num_ckpt_keep: int | None = None
+    permanent_ckpt_start: int | None = None
+    permanent_ckpt_interval: int | None = None
     extra: dict[str, object] = {}
 
     @field_validator("extra")
@@ -526,7 +534,9 @@ def _write_trainer_config(
     for key, value in (("hnsep_ckpt", opts.hnsep_ckpt),
                        ("max_updates", opts.max_updates),
                        ("val_check_interval", opts.val_check_interval),
-                       ("num_ckpt_keep", opts.num_ckpt_keep)):
+                       ("num_ckpt_keep", opts.num_ckpt_keep),
+                       ("permanent_ckpt_start", opts.permanent_ckpt_start),
+                       ("permanent_ckpt_interval", opts.permanent_ckpt_interval)):
         if value is not None:
             config[key] = value
     config.update(opts.extra)  # validated against PROFILE_OWNED_KEYS at load time
