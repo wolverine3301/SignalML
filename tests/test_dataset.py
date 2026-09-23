@@ -14,6 +14,7 @@ from signalml.config import CONFIGS_DIR, active_profile
 from signalml.manifest import Manifest, scan_directory
 from signalml.stages.common import song_dir, update_analysis
 from signalml.stages.dataset import (
+    SP,
     DatasetRecipe,
     SegmentationCfg,
     build,
@@ -215,6 +216,41 @@ class TestBuild:
         assert len(overfit.filters.singers) == 3
         assert load_dataset_recipe(
             CONFIGS_DIR / "dataset.full_v2.yaml").filters.min_singer_minutes == 5.0
+
+    def test_ph_num_word_division(self, tmp_path, make_wav):
+        """ph_num is phones-per-word: required for variance duration prediction and
+        by SOME's dataset mode, and it must sum to the ph_seq length or the trainer
+        rejects the row."""
+        root = tmp_path / "dr"
+        _ready_song(root, make_wav)
+        summary = build(root, recipe=recipe())
+        with open(summary.out_dir / "alice-en" / "transcriptions.csv",
+                  encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        assert rows, "no clips"
+        for row in rows:
+            phones = row["ph_seq"].split()
+            counts = [int(n) for n in row["ph_num"].split()]
+            assert sum(counts) == len(phones)
+            assert all(n >= 1 for n in counts)
+            # every group is either one SP, or a run of real phones: a silence always
+            # closes a word, even mid-word (the fixture's 'shine' has a 50 ms gap in
+            # it, so it groups as 2 + SP + 1, and that is the honest reading)
+            i = 0
+            for count in counts:
+                group = phones[i:i + count]
+                assert group, "empty word group"
+                if SP in group:
+                    assert group == [SP], f"SP must be its own word, got {group}"
+                i += count
+        # a word whose phones are contiguous stays one group
+        assert any(int(n) > 1 for row in rows for n in row["ph_num"].split())
+
+    def test_variance_build_explains_the_transcriber_pass(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        _ready_song(root, make_wav)
+        with pytest.raises(NotImplementedError, match="batch_infer"):
+            build(root, recipe=recipe(trainer="variance"))
 
     def test_filters_and_reasons(self, tmp_path, make_wav):
         root = tmp_path / "dr"

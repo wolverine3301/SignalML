@@ -12,6 +12,22 @@
 
 ---
 
+## D1. 🟡 The note-annotation gap — approach settled 2026-09-22, own transcriber is roadmap
+
+**Status update (2026-09-22):** SOME is superseded by openvpi **GAME**; Logan's call is
+to use the openvpi weights and proceed (licence caveat: SOME's weights are explicitly
+CC BY-NC-SA 4.0, GAME's carry no separate statement). The pipeline half is built —
+`signalml transcribe` (S5b, backend-injected) and `ph_num` in S6b's transcriptions.csv
+— and the chain is proven: SOME's dataset mode writes `note_seq`/`note_dur` with cent
+precision back into our own CSV, timelines matching `ph_dur` within 50 ms. First
+bake-off: mean note coverage 0.950 over five songs, CPU only. Remaining: generate a
+*variance* trainer config (S6b writes acoustic only). Logan intends to train his own
+transcriber eventually — see OPEN_QUESTIONS "Future direction" and
+`docs/notes/note_transcription.md`.
+
+<details>
+<summary>Original framing (July 2026)</summary>
+
 ## D1. 🔴 The note-annotation gap (NOT in the migration plan — biggest unplanned hole)
 
 **The gap:** the singer trains on *score → audio*, so every training phrase needs not
@@ -37,6 +53,8 @@ openvpi — but verify maintenance state at decision time. Note: the P7.5 overfi
 can start acoustic-only (ground-truth durations) before D1 is fully solved.
 **Delegable once decided:** the stage implementation (S5b "transcribe"), manifest
 wiring, QC sampling scripts.
+
+</details>
 
 ## D2. ✅ RESOLVED 2026-07-12 — Trainer integration boundary
 
