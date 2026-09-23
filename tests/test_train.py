@@ -144,6 +144,21 @@ class TestPlan:
         with pytest.raises(NotImplementedError, match="SingingVocoders"):
             plan_run(root, "ds1", trainer="vocoder", cfg=_cfg(trainer))
 
+    def test_variance_gets_its_own_experiment_name(self, tmp_path):
+        """checkpoints/<exp_name> is the trainer's work dir: sharing it between an
+        acoustic and a variance run over the same dataset would interleave two models'
+        checkpoints and clobber the config.yaml written there."""
+        trainer = _trainer_tree(tmp_path)
+        root, _ = _dataset(tmp_path)
+        cfg = _cfg(trainer)
+        acoustic = plan_run(root, "ds1", cfg=cfg)
+        variance = plan_run(root, "ds1", trainer="variance", cfg=cfg)
+        assert acoustic.exp_name == "ds1" and variance.exp_name == "ds1_variance"
+        assert acoustic.ckpt_dir != variance.ckpt_dir
+        # an explicit --exp-name still wins
+        assert plan_run(root, "ds1", trainer="variance", cfg=cfg,
+                        exp_name="mine").exp_name == "mine"
+
     def test_variance_uses_its_own_config_and_says_when_it_is_missing(self, tmp_path):
         """D1 landed: variance is no longer refused outright, it just needs the
         config `dataset variance-config` writes."""

@@ -158,7 +158,10 @@ def plan_run(
     generated = load_generated_config(config_path) if config_path.exists() else {}
     binary_dir = Path(generated.get("binary_data_dir") or (dataset_dir / "binary"))
 
-    exp_name = exp_name or dataset
+    # the trainer's work dir is checkpoints/<exp_name>, so acoustic and variance runs
+    # over one dataset must not share a name: different binarizers, different tensors,
+    # and their config.yaml lands in that directory too
+    exp_name = exp_name or (dataset if trainer == "acoustic" else f"{dataset}_{trainer}")
     trainer_dir = cfg.resolved_trainer_dir()
     python = cfg.resolved_trainer_python()
     stamp = now.strftime("%Y%m%d_%H%M%S")
