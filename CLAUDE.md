@@ -8,12 +8,17 @@ P5's corpus work (MFA install, real alignment runs, SOFA eval) still needs the
 dataset/rig; P7.3 (`signalml train` wrapper + run records) done 2026-09-20, with the
 rig recipes `configs/dataset.overfit.yaml` (P7.5 sanity run, amended to the **prod**
 profile) and `configs/dataset.full_v2.yaml` (first multi-singer run).** The design
-docs below are the source of truth. Next actions: the first rig session — clone +
-`scripts/bootstrap_rig.ps1`, ship the corpus, rebuild the dataset *there* (generated
-configs carry absolute paths), `signalml train acoustic --dataset overfit_v1`; then
-the own vocoder (P7.4: openvpi/SingingVocoders is **not yet vendored**). NOTE:
-development happens on Logan's laptop (GTX 1650) and the 2080S work PC; heavy/GPU
-work runs on the 5090 rig — clone the repo there and follow README "GPU install". F0 note: RMVPE is
+docs below are the source of truth. **Rig session 1 (2026-09-20) is done**: overfit_v1
+trained to 20k steps, acoustic resynthesis works end to end. Next actions: **D1** (note
+labels via SOME — without them there is no variance model, so the system re-sings
+existing takes but cannot sing a new score), then rig session 2 =
+`full_acoustic_v2` (49 singers, 9.9 h; ship `rig01`, rebuild the dataset *there* since
+generated configs carry absolute paths), and **P7.4** (openvpi/SingingVocoders is
+**not yet vendored**, so every render is still NC-licensed). NOTE:
+development happens on Logan's laptop (GTX 1650) and the 2080S work PC; heavy/GPU work
+runs on the rig (borrowed RTX 4090, everything under `G:\SIGNAL_AI`, reached by SSH —
+`docs/notes/rig_session_2026-09-20.md`). First training run landed 2026-09-20:
+overfit_v1, 20k steps, resynthesis works. F0 note: RMVPE is
 not on PyPI; backends are pyin (default) / torchcrepe, with rmvpe vendored in P7.
 
 Dev loop: `python -m uv sync` · `python -m uv run pytest` · `python -m uv run ruff
@@ -32,7 +37,9 @@ check .` — all must pass before a phase is called done.
 
 ## Stack (decided)
 
-- **Python ≥3.11, PyTorch ≥2.7 (CUDA 12.8 wheels — RTX 5090/sm_120)**. No TensorFlow —
+- **Python ≥3.11, PyTorch ≥2.7 (CUDA 12.8 wheels)**. The rig is a borrowed **RTX 4090**
+  (sm_89, 24 GB), not the 5090 long assumed here; cu128 wheels list no sm_89 and run on
+  it anyway (cubins are compatible within a generation). No TensorFlow —
   do not reintroduce it (Spleeter is retired in favor of Demucs).
 - Environment: **native Windows first** (Logan's decision, Q5); `uv` for the Python env;
   conda only for MFA (its own `aligner` env). Keep all code path-portable (`pathlib`,

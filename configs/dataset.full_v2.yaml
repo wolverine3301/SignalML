@@ -45,4 +45,8 @@ trainer_opts:
   max_batch_frames: 50000
   max_batch_size: 48
   binarization_workers: 8
-  num_ckpt_keep: 5
+  num_ckpt_keep: 5              # rolling, for resume
+  # ~850 MB each: a checkpoint every 10k steps across a 160k run is ~13 GB, which is
+  # the price of being able to go back to the step that sounded best.
+  permanent_ckpt_start: 10000
+  permanent_ckpt_interval: 10000

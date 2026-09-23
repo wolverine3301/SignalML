@@ -33,6 +33,10 @@ test_clips_per_speaker: 2
 # mel contract comes from the profile, and `extra` refuses those keys, D5).
 # These defaults fit an 8 GB card; the rig recipes raise them.
 trainer_opts:
+  # FLOOR: max_batch_frames must exceed the largest single clip, or the trainer
+  # asserts before step 1 - "sentence at index N of size 7167 exceeds
+  # max_batch_samples limit of 6000". A 15 s clip (segmentation.max_clip_sec) costs
+  # ~7200 by their measure, so anything under ~8000 refuses to start on this corpus.
   max_batch_frames: 30000   # their acoustic template: 50000
   max_batch_size: 16        # their acoustic template: 64
   binarization_workers: 4
@@ -44,5 +48,9 @@ trainer_opts:
   val_with_vocoder: null
   max_updates: null         # null = whatever the vendored config says (160000)
   val_check_interval: null
-  num_ckpt_keep: null
+  num_ckpt_keep: null       # ROLLING window - the last N only
+  # Every Nth checkpoint from `start` is kept forever, whatever num_ckpt_keep does.
+  # Without it a run that peaks early deletes its own best checkpoint (2026-09-20).
+  permanent_ckpt_start: null
+  permanent_ckpt_interval: null
   extra: {}                 # any other vendored-trainer key, merged last

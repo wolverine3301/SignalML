@@ -166,6 +166,7 @@ class TestBuild:
             "max_batch_frames": 80000, "max_batch_size": 64,
             "binarization_workers": 8, "num_ckpt_keep": 3, "max_updates": 20000,
             "hnsep": "vr", "hnsep_ckpt": "checkpoints/vr/model.pt",
+            "permanent_ckpt_start": 1000, "permanent_ckpt_interval": 1000,
             "val_with_vocoder": True, "extra": {"lr": 0.0004},
         }))
         config = yaml.safe_load(
@@ -174,6 +175,10 @@ class TestBuild:
         assert config["max_batch_size"] == 64
         assert config["binarization_args"]["num_workers"] == 8
         assert config["num_ckpt_keep"] == 3 and config["max_updates"] == 20000
+        # rolling window + a permanent ladder: the rolling one alone deleted the best
+        # checkpoint of the 2026-09-20 run
+        assert config["permanent_ckpt_start"] == 1000
+        assert config["permanent_ckpt_interval"] == 1000
         # explicit override beats the profile-derived default (dev would be False)
         assert config["val_with_vocoder"] is True
         assert config["lr"] == 0.0004
@@ -188,6 +193,7 @@ class TestBuild:
         config = yaml.safe_load(
             (summary.out_dir / "config_acoustic.yaml").read_text(encoding="utf-8"))
         assert "max_updates" not in config and "num_ckpt_keep" not in config
+        assert "permanent_ckpt_start" not in config
 
     def test_extra_cannot_overwrite_the_audio_contract(self):
         """D5: mel params come from the profile or the run is silently corrupt."""
@@ -202,6 +208,9 @@ class TestBuild:
         full_opts = load_dataset_recipe(CONFIGS_DIR / "dataset.full_v2.yaml").trainer_opts
         # the overfit proof wants many small updates, the real run wants throughput
         assert overfit_opts.max_batch_frames < full_opts.max_batch_frames
+        # both keep a permanent checkpoint ladder, whatever the rolling window does
+        for opts in (overfit_opts, full_opts):
+            assert opts.permanent_ckpt_start and opts.permanent_ckpt_interval
         overfit = load_dataset_recipe(CONFIGS_DIR / "dataset.overfit.yaml")
         assert len(overfit.filters.singers) == 3
         assert load_dataset_recipe(
