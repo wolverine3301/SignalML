@@ -167,6 +167,10 @@ class Clip:
     tokens: tuple[str, ...]
     durations: tuple[float, ...]
     has_noise: bool
+    # phones per word, in token order and summing to len(tokens) - the trainer's
+    # `ph_num` column (word division). Required for variance duration prediction and
+    # by SOME's dataset mode; see docs/notes/note_transcription.md.
+    ph_num: tuple[int, ...] = ()
 
 
 def segment_phones(
@@ -198,22 +202,46 @@ def segment_phones(
         end = min(audio_len_sec, g[-1]["end"] + cfg.pad_sec)
         tokens: list[str] = []
         durations: list[float] = []
+        # ph_num counts phones per word. SP is its own word, and a word ends when the
+        # word label changes or a silence token separates two phones. Adjacent
+        # identical labels with no gap ("na na") merge into one group: phones.json
+        # carries a word *string*, not a word index, so that is the honest limit -
+        # the sum still matches ph_seq, only the division is coarser there.
+        groups: list[int] = []
+
+        def open_word(count: int = 1) -> None:
+            groups.append(count)
+
+        def extend_word() -> None:
+            groups[-1] += 1
+
+        prev_word: object = object()  # sentinel: nothing has been emitted yet
         cursor = start
         for p in g:
             gap = p["start"] - cursor
             if gap >= cfg.inner_sp_min_sec:
                 tokens.append(SP)
                 durations.append(gap)
+                open_word()
+                prev_word = None  # a silence always closes the previous word
                 cursor = p["start"]
             ph_end = max(p["end"], cursor)  # tiny gaps merge into this phone
             tokens.append(p["ph"])
             durations.append(ph_end - cursor)
+            word = p.get("word")
+            if word is not None and word == prev_word:
+                extend_word()
+            else:
+                open_word()
+            prev_word = word
             cursor = ph_end
         if end - cursor >= 1e-4:
             tokens.append(SP)
             durations.append(end - cursor)
+            open_word()
         clips.append(Clip(start=start, end=end, tokens=tuple(tokens),
-                          durations=tuple(durations), has_noise=has_noise))
+                          durations=tuple(durations), has_noise=has_noise,
+                          ph_num=tuple(groups)))
 
     for p in phones:
         if not group:
@@ -371,8 +399,11 @@ def build(
     recipe = recipe or load_dataset_recipe()
     if recipe.trainer == "variance":
         raise NotImplementedError(
-            "variance datasets need note_seq/note_dur — blocked on DECISION_POINTS D1 "
-            "(SOME/MakeDiffSinger note-annotation bake-off)"
+            "variance datasets need note_seq/note_dur, which come from the transcriber "
+            "pass, not from this build: run `dataset build` with trainer: acoustic "
+            "(ph_num is emitted), then SOME's batch_infer.py over the result to add "
+            "note_seq/note_dur to the same transcriptions.csv, then point a variance "
+            "config at that directory. See docs/notes/note_transcription.md (D1)."
         )
 
     out_dir = data_root / "datasets" / recipe.name
@@ -398,7 +429,7 @@ def build(
     singers = sorted({rec.meta.singer for rec in selected})
     spk_ids = {s: i for i, s in enumerate(singers)}
     phones_used: set[str] = set()
-    per_folder_rows: dict[str, list[tuple[str, str, str]]] = {}
+    per_folder_rows: dict[str, list[tuple[str, str, str, str]]] = {}
     per_speaker_stats: dict[str, dict] = {
         s: {"clips": 0, "seconds": 0.0, "songs": 0,
             # carried into the card so a gender-filtered build is auditable after
@@ -430,6 +461,7 @@ def build(
                 name,
                 " ".join(clip.tokens),
                 " ".join(f"{d:.6f}" for d in durations),
+                " ".join(str(n) for n in clip.ph_num),
             ))
             phones_used.update(clip.tokens)
             per_speaker_stats[rec.meta.singer]["clips"] += 1
@@ -446,7 +478,10 @@ def build(
         with open(out_dir / folder / "transcriptions.csv", "w", newline="",
                   encoding="utf-8") as fh:
             writer = csv.writer(fh)
-            writer.writerow(["name", "ph_seq", "ph_dur"])
+            # ph_num (word division) is required for variance duration prediction and
+            # by SOME's dataset mode, which writes note_seq/note_dur back into this
+            # same file. The acoustic binarizer reads by column name and ignores it.
+            writer.writerow(["name", "ph_seq", "ph_dur", "ph_num"])
             writer.writerows(rows)
 
     _write_dictionary(out_dir, phones_used, recipe.filters.language)
@@ -471,7 +506,7 @@ def _write_trainer_config(
     recipe: DatasetRecipe,
     selected: list[ManifestRecord],
     spk_ids: dict[str, int],
-    per_folder_rows: dict[str, list[tuple[str, str, str]]],
+    per_folder_rows: dict[str, list[tuple[str, str, str, str]]],
     phones_used: set[str],
 ) -> None:
     profile = active_profile(recipe.profile)

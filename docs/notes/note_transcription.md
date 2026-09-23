@@ -90,6 +90,34 @@ So the sequence to variance training is: S6b emits `ph_num` -> `dataset build` -
 `batch_infer.py` over that dataset -> `note_seq`/`note_dur` land in the same CSV ->
 `trainer: variance` recipe stops being blocked.
 
+## Proven end to end (2026-09-22)
+
+S6b now emits `ph_num`, and SOME's dataset mode was run over six real clips from
+`overfit_v1/runn-en`, CPU only:
+
+```
+columns: name, ph_seq, ph_dur, ph_num, note_seq, note_dur
+ph_seq    SP aj n ew SP
+ph_num    1 1 2 1
+note_seq  rest rest F4+43 F4+41 F#4+11 F#4+11 F#4+11
+note_dur  0.11 0.215079 0.719819 0.24381 0.171292 1.88 0.15
+```
+
+Pitch arrives as **note name plus cents** (`F4+43`, `G4-23`) - the fractional detail the
+`--midi` path discards - and `rest` covers silence. Checked on every row: `note_seq`
+and `note_dur` are the same length, and `note_dur` totals match `ph_dur` totals within
+50 ms, so the note timeline and the phone timeline describe the same clip.
+
+Throughput, CPU (no GPU): **6 clips in 11.5 s**, ~2 clips/s. That is ~7 minutes for
+`overfit_v1` (873 clips) and ~40 minutes for `full_acoustic_v2` (4,525 clips) - small
+enough to run on the work PC without touching a GPU, and ~300x faster on the rig if
+we ever want it there.
+
+What is still missing before `signalml train variance` runs: S6b generates an
+*acoustic* config only. A variance run needs their `configs/variance.yaml` base with
+`predict_dur` / `predict_pitch` flags, pointed at the same raw dataset directory. That
+is the next code change; the data side is done.
+
 ## Own note transcriber (Logan's, roadmap)
 
 Logan wants to build this rather than depend on openvpi's, and it is a better fit for
