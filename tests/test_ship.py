@@ -149,6 +149,34 @@ class TestPlan:
                                recipe=recipe(filters={"gender": "M"}),
                                with_code=False, progress=False)
 
+    def test_unprocessed_ships_raw_sidecars_and_records(self, sender, make_wav):
+        """Harvested songs go to the rig before alignment: audio + META/lyrics + the
+        records (ids minted on the sender), and nothing already aligned."""
+        folder = sender / "RAW" / "harvest" / "bea" / "Song-abcdefghijk"
+        make_wav(folder / "Song-abcdefghijk.wav", seconds=1.0, hz=330)
+        (folder / "META.txt").write_text("SINGER:bea\nLICENSE:licence note\n",
+                                         encoding="utf-8")
+        make_wav(sender / "RAW" / "other" / "x.wav", seconds=1.0, hz=550)
+        manifest, new = scan_directory(sender, subpath="RAW", language="en", gender="F")
+        manifest.save()
+        harvested = next(r.id for r in new if "harvest" in r.file.path)
+
+        plan = planmod.build_plan(sender, what="unprocessed", prefix="RAW/harvest",
+                                  with_code=False, progress=False)
+        assert plan.name == "unprocessed" and plan.song_ids == [harvested]
+        paths = {i.path for i in plan.items}
+        assert {"RAW/harvest/bea/Song-abcdefghijk/Song-abcdefghijk.wav",
+                "RAW/harvest/bea/Song-abcdefghijk/META.txt", MANIFEST_NAME} <= paths
+        assert not any("sng_0001" in p or "RAW/other" in p for p in paths)
+        # without a prefix every unaligned song goes, the aligned one still does not
+        everything = planmod.build_plan(sender, what="unprocessed", name="u2",
+                                        with_code=False, progress=False)
+        assert len(everything.song_ids) == 2 and "sng_0001" not in everything.song_ids
+
+    def test_unprocessed_refuses_when_everything_is_aligned(self, sender):
+        with pytest.raises(RuntimeError, match="no unaligned songs"):
+            planmod.build_plan(sender, what="unprocessed", with_code=False, progress=False)
+
     def test_hash_cache_survives_a_replan(self, sender):
         first = planmod.build_plan(sender, what="dataset", dataset_name="t1",
                                    with_code=False, progress=False)

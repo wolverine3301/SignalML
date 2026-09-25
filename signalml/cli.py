@@ -721,8 +721,8 @@ def _cmd_ship_plan(args: argparse.Namespace) -> int:
     from .stages.dataset import load_dataset_recipe
 
     data_root = resolve_data_root(args.data_root)
-    recipe = load_dataset_recipe(args.recipe) if args.recipe or args.what != "dataset" \
-        else None
+    recipe = load_dataset_recipe(args.recipe) if args.recipe or \
+        args.what not in ("dataset", "unprocessed") else None
     try:
         plan = build_plan(
             data_root,
@@ -733,6 +733,7 @@ def _cmd_ship_plan(args: argparse.Namespace) -> int:
             with_code=not args.no_code,
             with_features=args.with_features,
             with_raw=args.with_raw,
+            prefix=args.prefix,
             allow_dirty=args.allow_dirty,
         )
     except (RuntimeError, ValueError, FileNotFoundError) as exc:
@@ -1286,9 +1287,14 @@ def main(argv: list[str] | None = None) -> int:
     plan_p.add_argument("--data-root", default=None,
                         help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
     plan_p.add_argument("--what", default="rebuildable",
-                        choices=["dataset", "rebuildable", "full"],
+                        choices=["dataset", "rebuildable", "full", "unprocessed"],
                         help="dataset = trainer input only; rebuildable = clean/ + "
-                             "align/ so the rig can rebuild recipes; full = + stems")
+                             "align/ so the rig can rebuild recipes; full = + stems; "
+                             "unprocessed = raw audio + sidecars of songs not aligned "
+                             "yet, for the rig to separate/lyric/align")
+    plan_p.add_argument("--prefix", default=None,
+                        help="--what unprocessed: only files under this DATA_ROOT-"
+                             "relative path, e.g. RAW/harvest")
     plan_p.add_argument("--name", default=None,
                         help="shipment name (default: the dataset/recipe name)")
     plan_p.add_argument("--dataset-name", default=None,
