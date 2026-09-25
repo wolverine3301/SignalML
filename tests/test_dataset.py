@@ -285,8 +285,10 @@ class TestBuild:
             assert r.profile == "prod"  # the rig trains at prod, dev is throwaway
         overfit_opts = load_dataset_recipe(CONFIGS_DIR / "dataset.overfit.yaml").trainer_opts
         full_opts = load_dataset_recipe(CONFIGS_DIR / "dataset.full_v2.yaml").trainer_opts
-        # the overfit proof wants many small updates, the real run wants throughput
-        assert overfit_opts.max_batch_frames < full_opts.max_batch_frames
+        # measured on the 24 GB rig: above ~20000 frames at prod the batch spills out of
+        # VRAM into system RAM and a step takes seconds instead of milliseconds
+        for opts in (overfit_opts, full_opts):
+            assert opts.max_batch_frames <= 20000
         # both keep a permanent checkpoint ladder, whatever the rolling window does
         for opts in (overfit_opts, full_opts):
             assert opts.permanent_ckpt_start and opts.permanent_ckpt_interval

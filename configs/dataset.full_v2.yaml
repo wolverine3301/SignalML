@@ -41,13 +41,12 @@ segmentation:
 test_clips_per_speaker: 2
 
 trainer_opts:
-  # Frames, not seconds: at prod (44.1 kHz / hop 512) 50000 frames is ~9.7 min of audio
-  # per step. Their acoustic template's default, and a reasonable middle for a real
-  # multi-singer run on the 24 GB rig - 80000/64 measured at 24 GB used and 0.26
-  # steps/s there, which is too close to the edge and too few updates per hour.
-  # Halve max_batch_frames first if it OOMs.
-  max_batch_frames: 50000
-  max_batch_size: 48
+  # Frames, not seconds. Measured on the 24 GB 4090 (2026-09-25): 50000/48 filled VRAM,
+  # spilled to system RAM and ran at 0.10 steps/s; 20000/32 uses ~21 GB and settles at
+  # ~6.4 steps/s after the first epochs (early epochs are slow while cuDNN tunes for
+  # new batch shapes - judge speed from epoch 3 on, not the first minutes).
+  max_batch_frames: 20000
+  max_batch_size: 32
   binarization_workers: 8
   num_ckpt_keep: 5              # rolling, for resume
   # ~850 MB each: a checkpoint every 10k steps across a 160k run is ~13 GB, which is
