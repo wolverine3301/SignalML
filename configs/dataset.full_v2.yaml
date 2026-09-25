@@ -35,6 +35,8 @@ segmentation:
   pad_sec: 0.15
   inner_sp_min_sec: 0.05
   drop_noise_clips: true
+  # one ph_num group per sung note - what the variance model reads at inference
+  ph_num_mode: vowel_onset
 
 test_clips_per_speaker: 2
 
