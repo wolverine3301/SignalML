@@ -41,7 +41,7 @@ Then land the code: `git checkout main && git merge rig-day && git push`.
 ## 2. Noon, rig: code + tools (GPU idle while this runs)
 
 ```powershell
-cd G:\SIGNAL_AI\SignalML; git pull
+cd G:\SIGNAL_AI\SignalML; git fetch origin; git reset --hard origin/main   # history was rewritten 2026-09-25: pull cannot fast-forward
 powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap_rig.ps1 -DataRoot G:\SIGNAL_AI\DATA_ROOT
 ```
 
