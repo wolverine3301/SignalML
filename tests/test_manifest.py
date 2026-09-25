@@ -290,15 +290,15 @@ class TestScan:
         manifest, _ = scan_directory(root)
         manifest.save()
 
-        dup = root / "RAW" / "Full" / "Song A (Cover)-AAAAAAAAAAA"
+        dup = root / "RAW" / "legacy_stems" / "Song A (Cover)-AAAAAAAAAAA"
         make_wav(dup / "vocals.wav", hz=300)
-        fresh = root / "RAW" / "Full" / "Song B (Cover)-BBBBBBBBBBB"
+        fresh = root / "RAW" / "legacy_stems" / "Song B (Cover)-BBBBBBBBBBB"
         make_wav(fresh / "vocals.wav", hz=330)
         make_wav(fresh / "accompaniment.wav", hz=110)  # must NOT become a record
         (fresh / "lyrics.txt").write_text("la la", encoding="utf-8")
         (fresh / "META.txt").write_text("SINGER:Alice\nQUALITY:B\nGENRE:pop\n",
                                         encoding="utf-8")
-        (root / "RAW" / "Full" / "empty-folder").mkdir()
+        (root / "RAW" / "legacy_stems" / "empty-folder").mkdir()
 
         manifest, new, skipped = import_stem_folders(
             root, subpath="RAW/legacy_stems", language="en", gender="F")

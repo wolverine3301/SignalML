@@ -164,7 +164,8 @@ class DatasetRecipe(BaseModel):
 def _deep_merge(base: dict, over: dict) -> dict:
     out = dict(base)
     for key, val in over.items():
-        out[key] = _deep_merge(out[key], val)             if isinstance(val, dict) and isinstance(out.get(key), dict) else val
+        nested = isinstance(val, dict) and isinstance(out.get(key), dict)
+        out[key] = _deep_merge(out[key], val) if nested else val
     return out
 
 
