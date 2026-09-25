@@ -26,6 +26,7 @@ import datetime as _dt
 import json
 import re
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -40,6 +41,7 @@ from .common import song_dir
 
 SP = "SP"  # silence token (DiffSinger global phoneme)
 AP = "AP"  # aspiration token (reserved; we do not detect breaths yet)
+PH_NUM_PHONE_SET = "mfa_ipa/en_v1"  # nucleus inventory for ph_num_mode: vowel_onset
 
 
 class DatasetFilters(BaseModel):
@@ -72,6 +74,14 @@ class SegmentationCfg(BaseModel):
     pad_sec: float = 0.15  # silence kept around each clip
     inner_sp_min_sec: float = 0.05  # smaller gaps merge into the previous phone
     drop_noise_clips: bool = True  # clips containing spn (alignment holes)
+    # How phones are grouped into the `ph_num` column. The variance model treats a group
+    # as "the phones within each NOTE" (their binarizer's words, and at inference a new
+    # group starts at every non-slur note), so dictionary words are the wrong unit for
+    # anything multi-syllable. vowel_onset = a group starts at each vowel/syllabic
+    # nucleus (and at SP/AP); consonants join the group before them, since a sung note
+    # lands on its vowel and the onset consonant is sung ahead of the beat. `word` is
+    # the original (2026-09-22) division, kept so existing datasets rebuild identically.
+    ph_num_mode: Literal["word", "vowel_onset"] = "word"
 
 
 # The mel/audio contract is owned end-to-end by the active audio profile (D5,
@@ -176,6 +186,19 @@ class Clip:
     ph_num: tuple[int, ...] = ()
 
 
+def vowel_onset_groups(tokens: tuple[str, ...] | list[str],
+                       is_nucleus: Callable[[str], bool]) -> tuple[int, ...]:
+    """``ph_num`` with one group per note onset: SP/AP and every nucleus open a group,
+    consonants extend the open one (a leading consonant with nothing open opens one)."""
+    groups: list[int] = []
+    for tok in tokens:
+        if tok in (SP, AP) or is_nucleus(tok) or not groups:
+            groups.append(1)
+        else:
+            groups[-1] += 1
+    return tuple(groups)
+
+
 def segment_phones(
     phones: list[dict], cfg: SegmentationCfg, *, audio_len_sec: float
 ) -> tuple[list[Clip], int]:
@@ -242,6 +265,9 @@ def segment_phones(
             tokens.append(SP)
             durations.append(end - cursor)
             open_word()
+        if cfg.ph_num_mode == "vowel_onset":
+            from ..score.phoneset import get_phone_set
+            groups = list(vowel_onset_groups(tokens, get_phone_set(PH_NUM_PHONE_SET).is_nucleus))
         clips.append(Clip(start=start, end=end, tokens=tuple(tokens),
                           durations=tuple(durations), has_noise=has_noise,
                           ph_num=tuple(groups)))

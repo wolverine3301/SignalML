@@ -12,6 +12,7 @@ import yaml
 
 from signalml.config import CONFIGS_DIR, active_profile
 from signalml.manifest import Manifest, scan_directory
+from signalml.score.phoneset import get_phone_set
 from signalml.stages.common import song_dir, update_analysis
 from signalml.stages.dataset import (
     SP,
@@ -20,6 +21,7 @@ from signalml.stages.dataset import (
     build,
     load_dataset_recipe,
     segment_phones,
+    vowel_onset_groups,
     write_variance_config,
 )
 
@@ -324,6 +326,35 @@ class TestBuild:
                 i += count
         # a word whose phones are contiguous stays one group
         assert any(int(n) > 1 for row in rows for n in row["ph_num"].split())
+
+    def test_vowel_onset_groups(self):
+        """One group per note onset: the variance model's 'word' is the phones within
+        a note, and a note lands on its vowel. A two-syllable dictionary word becomes
+        two groups; SP opens its own and takes the next onset consonant with it."""
+        nucleus = {"ɪ", "ə", "aj", "ej"}.__contains__
+        toks = ["SP", "b", "ɪ", "j", "ə", "SP", "s", "t", "ej", "SP"]
+        assert vowel_onset_groups(toks, nucleus) == (2, 2, 1, 3, 1, 1)
+        assert vowel_onset_groups(["s", "t", "ej"], nucleus) == (2, 1)  # leading onset
+        assert sum(vowel_onset_groups(toks, nucleus)) == len(toks)
+
+    def test_ph_num_mode_vowel_onset_in_a_build(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        _ready_song(root, make_wav)
+        seg = {**recipe().segmentation.model_dump(), "ph_num_mode": "vowel_onset"}
+        summary = build(root, recipe=recipe(segmentation=seg))
+        with open(summary.out_dir / "alice-en" / "transcriptions.csv",
+                  encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        assert rows
+        for row in rows:
+            phones, counts = row["ph_seq"].split(), [int(n) for n in row["ph_num"].split()]
+            assert sum(counts) == len(phones)
+            i = 0
+            for count in counts:  # every group opens on SP or a nucleus
+                head = phones[i]
+                assert head == SP or get_phone_set("mfa_ipa/en_v1").is_nucleus(head) \
+                    or i == 0, f"group opens on consonant {head!r}"
+                i += count
 
     def test_variance_build_explains_the_transcriber_pass(self, tmp_path, make_wav):
         root = tmp_path / "dr"
