@@ -157,7 +157,7 @@ passes; no anonymous `arr_0` keys anywhere.
 > archived, `manifest report` census command + `meta.source_quality` field added.
 > **Still needs the real corpus/rig:** MFA conda install + phone-set verify (README
 > steps), first real alignment runs + spot-check listening, the SOFA eval (P5.4),
-> and the lyrics-coverage verification pass over the N h corpus (P5.2).
+> and the lyrics-coverage verification pass over the corpus (P5.2).
 
 1. Document **native-Windows MFA install** (conda env `aligner`, conda-forge package) in
    README, including the known-fragility note and both fallbacks (SOFA; MFA-only WSL2
@@ -186,7 +186,7 @@ passes; no anonymous `arr_0` keys anywhere.
 6. Tests: TextGrid fixture → phones.json golden file; converter rejects phones outside
    the declared phone set.
 7. **Gaelic (wave-2 confirmed — Q13; do not build now):** corpus has both Irish (`ga`)
-   and Scottish Gaelic (`gd`) in separate folders (N h, lyrics included) — tag
+   and Scottish Gaelic (`gd`) in separate folders (lyrics included) — tag
    `meta.language` per folder during P1's manifest scan so the split is preserved. When
    green-lit, this phase gains per-language configs: espeak-ng-bootstrapped `ga`/`gd`
    dictionaries → MFA custom acoustic-model training on the transcribed subsets.
@@ -258,7 +258,7 @@ old parser deleted.
    needs only clean vocal audio (no alignments), so **start it as soon as P3/P4 output
    exists**, in parallel with P5/P6: NSF-HiFiGAN-class architecture from the vendored
    stack, trained on the cleaned own corpus at the **prod profile** (44.1 kHz) —
-   **including the N h Gaelic audio** (vocoder training is alignment-free, so wave-2
+   **including the Gaelic audio** (vocoder training is alignment-free, so wave-2
    sequencing doesn't idle that data; Q13). Expect 1–2 weeks wall-clock on the 5090 — it can run while alignment
    and score work proceeds. The community PC-NSF-HiFiGAN checkpoint may be used
    *only* as a temporary dev preview meanwhile (CC BY-NC — record it in run configs;
@@ -267,13 +267,12 @@ old parser deleted.
    singers), train until it can resing a training snippet recognizably. This validates
    the entire data path before burning days on real runs.
    Recipe: `configs/dataset.overfit.yaml` (`overfit_v1` — the three singers with the
-   most clipped audio, ~1.8 h).
+   most clipped audio).
    **Amended 2026-09-20: run it at the `prod` profile, not `dev`.** Dev exists to make
    iteration bearable on an 8 GB card; on the 5090 that reason is gone, while dev would
    cost the only 44.1 kHz vocoder checkpoint we have (so: no listening) and fork the
    mel contract for a checkpoint that is throwaway anyway.
-   **Binarization already validated on the work PC 2026-09-20** (N clips / 1.N h,
-   12 valid): the D3 IPA smoke test passed and the two config snags it surfaced
+   **Binarization already validated on the work PC 2026-09-20** (12 valid): the D3 IPA smoke test passed and the two config snags it surfaced
    (global `AP` coverage, eager `hnsep: vr` checkpoint) are fixed in S6b's generated
    config — see `docs/notes/vendor_diffsinger.md`. What is left for the rig is the
    training itself.
@@ -281,9 +280,9 @@ old parser deleted.
    per-singer quality. English-only first; Gaelic data joins per Q13 (wave-2 —
    phoneme-level IPA conditioning means added Gaelic data extends, not restructures,
    this run). Recipe: `configs/dataset.full_v2.yaml` (`full_acoustic_v2` =
-   `full_acoustic_v1` plus a 5-minute-per-speaker floor: v1's N speakers include 111
-   under five minutes, whose embeddings are noise in the space the voice bank samples
-   from. v1 stays on disk as the control).
+   `full_acoustic_v1` with the speaker floor moved from training to voice-bank sampling; exclusions
+   that name singers live in the gitignored `.local.yaml` overlay. v1 stays on disk as
+   the control).
 7. Implement voice bank (`signalml voice new` per contracts §5): embedding extraction
    from checkpoint, Gaussian fit, sampling, ECAPA similarity guard, profile persistence,
    ref-phrase rendering. Include `voice reproject` (re-fit an existing profile under a
@@ -335,7 +334,7 @@ P0 → P1 → P2 → P3 → P4 → P5 ─┐
 
 Rough calendar (solo, part-time): P0–P4 ≈ one focused week; P5–P6 ≈ one more; P7 is
 dominated by training wall-clock (own vocoder starts early and runs in parallel — P7.4);
-P8 days; P9 open-ended. With N h of vocals already curated (Q4), the highest-leverage
+P8 days; P9 open-ended. With a substantial corpus already curated (Q4), the highest-leverage
 early activity is **not more audio**: it's *metadata* — per-song singer identity and
 gender in the manifest (the timbre space depends on singer labels, ARCHITECTURE.md §4),
 lyrics-transcript coverage (Q14), and a singer-count census, all doable during P0–P4.

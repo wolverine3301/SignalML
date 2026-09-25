@@ -11,7 +11,7 @@ and [`aligner_eval.md`](aligner_eval.md), which consumes the eval sources below.
 
 | Corpus | Female audio | Singers | Licence | Lyrics? |
 |---|---|---|---|---|
-| `own` | N h en + N h ga/gd | **unknown — census pending** | mixed / private | yes, `.txt` sidecars |
+| `own` | private | private | private | yes, `.txt` sidecars |
 | `medleydb` | 1.70 h | 11 artist-level identities | CC BY-NC-SA 4.0 | no |
 | `vocalset` | 3.9 h | 9 | **CC BY 4.0** | no (`language=None` by design) |
 
@@ -26,7 +26,7 @@ Three gaps follow directly:
    MedleyDB's 11 are NC-encumbered, so they cannot close this for a shippable checkpoint.
 3. **Gaelic alignment has no off-the-shelf path** — see below.
 
-**Run the singer census (`manifest report`) before acting on gap 2.** If the N h already
+**Run the singer census (`manifest report`) before acting on gap 2.** If the corpus already
 holds 40 distinct singers, none of Tier 1's identity-boosting value applies and the priority
 collapses to gap 1 alone.
 

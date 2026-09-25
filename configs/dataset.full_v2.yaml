@@ -1,15 +1,14 @@
 # The first real multi-singer acoustic run (MIGRATION_PLAN P7.6).
 #
-# 2026-09-24: the 5-minute speaker floor is OFF. It dropped most speakers and a
-# third of the audio (N h -> N h) to protect the voice bank - an embedding fitted
-# on two minutes renders as the corpus average, and the ECAPA novelty guard has nothing
-# real to measure a sampled voice against. But that is a property of *sampling*, not of
-# training: small speakers cost little in backbone quality and the backbone gets 50% more
-# audio. So: train on everyone, and apply the floor when the voice bank picks which
-# spk embeddings to sample from (not yet enforced there - see OPEN_QUESTIONS).
+# The minimum-minutes speaker floor is OFF. It exists to protect the voice bank - an
+# embedding fitted on two minutes renders as the corpus average, and the ECAPA novelty
+# guard has nothing real to measure a sampled voice against - but that is a property of
+# *sampling*, not of training: small speakers cost little in backbone quality and the
+# backbone gets the extra audio. So: train on everyone, and apply the floor when the
+# voice bank picks which spk embeddings to sample from (see OPEN_QUESTIONS).
 #
-# exclude_singers: tags that are not one female voice. Their songs are male leads or
-# duets with a male singer, filed under a female-filtered name.
+# Private overlay: configs/dataset.full_v2.local.yaml (gitignored) sets
+# filters.exclude_singers - tags that are not one female voice.
 #
 #   signalml dataset build --recipe configs/dataset.full_v2.yaml
 name: full_acoustic_v2
@@ -25,12 +24,7 @@ filters:
   corpora: []
   exclude_corpora: []
   singers: []
-  exclude_singers:
-    - singer   # artist original - male lead
-    - singer       # artist "a song" original - male lead
-    - singer          # artist track, vocalist unconfirmed
-    - singer              # duet with a male singer
-    - singer             # a duet
+  exclude_singers: []   # set in the .local.yaml overlay
   min_singer_minutes: 0.0   # off - see header; the floor belongs to voice-bank sampling
   ids: []
 

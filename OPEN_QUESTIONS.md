@@ -82,7 +82,7 @@
 
 | Q | Decision | Where it landed |
 |---|---|---|
-| Q13 Gaelic | **Both Irish and Scottish Gaelic** (N h total, separate folders, **all with lyrics**). **Wave-2 confirmed**: alignment/custom-aligner work waits until the English model proves out. Meanwhile the Gaelic audio is *not* idle — vocoder training is alignment-free, so all of it joins vocoder training from day one; the manifest carries `language: ga`/`gd` per folder from the start | ARCHITECTURE §7 + risk register; MIGRATION P5.7 (per-language aligner config, wave-2) and P7.4 (Gaelic audio in vocoder corpus) |
+| Q13 Gaelic | **Both Irish and Scottish Gaelic** (private data, separate folders, **with lyrics**). **Wave-2 confirmed**: alignment/custom-aligner work waits until the English model proves out. Meanwhile the Gaelic audio is *not* idle — vocoder training is alignment-free, so all of it joins vocoder training from day one; the manifest carries `language: ga`/`gd` per folder from the start | ARCHITECTURE §7 + risk register; MIGRATION P5.7 (per-language aligner config, wave-2) and P7.4 (Gaelic audio in vocoder corpus) |
 | Q14 Lyrics | **Full coverage expected**: every song has a simple `.txt` lyrics file alongside the raw audio. P5's coverage scan becomes a verification pass, not a backfill hunt. A lyrics-*acquisition* step (fetch/Whisper-assist + human verify) stays on the roadmap as an S1 enhancement for future data | MIGRATION P5.2 (verify-not-backfill); S1 future enhancement noted |
 
 ## 2026-07-07 (first batch)
@@ -94,7 +94,7 @@
 | Q3 Score format | **JSON score file** confirmed | No changes; `phone_set` field now carries IPA set name |
 | Q4 Language | **Language-robust pipeline; focus English + Gaelic (own curated data)** | ARCHITECTURE §7 data section; spawned Q13 |
 | Q4 Vocoder/licensing | **Train our own vocoder** (community NC checkpoint only as temporary dev preview); commercial door kept open, dataset already curated with that in mind | ARCHITECTURE §3.3, MIGRATION P7 (own-vocoder training promoted from optional to milestone) |
-| Q4 Corpus size | **N h female vocals** — substantial; changes the data outlook from "scarce" to "alignment quality is the bottleneck" | ARCHITECTURE §7 |
+| Q4 Corpus size | **a substantial private corpus** — changes the data outlook from "scarce" to "alignment quality is the bottleneck" | ARCHITECTURE §7 |
 | Q5 Environment | **Windows-first for now** (WSL2 demoted to fallback/upgrade path) | ARCHITECTURE §2 rewritten; MIGRATION P5 (MFA via conda on native Windows, SOFA as escape hatch); CLAUDE.md |
 | Q6 Separation | **Demucs confirmed** | No changes |
 | Q7 Config | No preference → **YAML + pydantic** stands | No changes |

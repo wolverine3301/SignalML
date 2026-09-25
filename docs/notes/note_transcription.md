@@ -55,7 +55,7 @@ trained on the labels sings in tune.
 
 ## First bake-off run (2026-09-22, work PC, CPU only)
 
-SOME `0119_continuous256_5spk` (v1.0.0-baseline, 415 MB) over five singer
+SOME `0119_continuous256_5spk` (v1.0.0-baseline, 415 MB) over five
 songs through `signalml transcribe`. ~20 s per 2-minute vocal on CPU, no GPU:
 
 | id | notes | coverage | avg note | midi lo-hi |
@@ -93,7 +93,7 @@ So the sequence to variance training is: S6b emits `ph_num` -> `dataset build` -
 ## Proven end to end (2026-09-22)
 
 S6b now emits `ph_num`, and SOME's dataset mode was run over six real clips from
-`overfit_v1/singer-en`, CPU only:
+one `overfit_v1` speaker folder, CPU only:
 
 ```
 columns: name, ph_seq, ph_dur, ph_num, note_seq, note_dur
@@ -109,7 +109,7 @@ and `note_dur` are the same length, and `note_dur` totals match `ph_dur` totals 
 50 ms, so the note timeline and the phone timeline describe the same clip.
 
 Throughput, CPU (no GPU): **6 clips in 11.5 s**, ~2 clips/s. That is ~7 minutes for
-`overfit_v1` (N clips) and ~40 minutes for `full_acoustic_v2` (N clips) - small
+`overfit_v1` and ~40 minutes for `full_acoustic_v2` - small
 enough to run on the work PC without touching a GPU, and ~300x faster on the rig if
 we ever want it there.
 
@@ -125,7 +125,7 @@ the project than it first looks — SOME's own README claims usable results from
 of labelled data, and its training code is MIT.
 
 The honest obstacle: a note transcriber is *supervised*, so it needs audio with note
-labels, which is the very thing we lack. our aligned vocals are unlabelled at
+labels, which is the very thing we lack. Our aligned vocals are unlabelled at
 the note level. Paths that break the circle, roughly in order of cost:
 
 1. **Bootstrap from openvpi labels.** Transcribe our corpus with SOME/GAME, hand-correct

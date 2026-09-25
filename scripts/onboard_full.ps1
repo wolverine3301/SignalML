@@ -1,4 +1,4 @@
-# Unattended corpus onboarding: RAW/legacy_stems (pre-separated legacy stems) -> fully
+# Unattended corpus onboarding: a folder of pre-separated legacy stems -> fully
 # processed + first acoustic dataset + binarized trainer input.
 #
 # Designed to run DETACHED (survives the Claude session / a logout):

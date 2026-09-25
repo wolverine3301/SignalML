@@ -24,7 +24,7 @@ log files and no process). Use `Invoke-CimMethod Win32_Process Create` pointing 
 
 ## The run
 
-`overfit_v1` — 3 singers, N clips, 1.N h, prod profile. Rebuilt on the rig from a
+`overfit_v1` — 3 singers, prod profile. Rebuilt on the rig from a
 `rebuildable` shipment (0.77 GB, 49 songs, hash-verified) and it produced *exactly* the
 clip count built on the work PC, which is the dataset-purity claim actually holding
 across two machines.
@@ -69,8 +69,8 @@ only, nothing from this run ships (Q4).
 ## Next session
 
 - Keep the best-val checkpoint (see above) before another long run.
-- Ship the rest of the corpus (`corpus`, 6.42 GB planned and hash-cached) and run
-  `full_acoustic_v2` — N singers, N h, the first real multi-singer run.
+- Ship the rest of the corpus (planned and hash-cached) and run
+  `full_acoustic_v2` — the first real multi-singer run.
 - P7.4 still has step zero outstanding: `openvpi/SingingVocoders` is not vendored, and
   until it is, every render is NC-licensed.
 - Studio stems and VocalSet are still not cleaned/onboarded — both are vocoder data.

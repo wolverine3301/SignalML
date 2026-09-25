@@ -5,7 +5,7 @@ record verdict + samples."* This is the **design half**, written now because it 
 corpus — the metrics, the ground truth, and the protocol are all decidable in advance. The
 **Verdict** section is the part that waits for the corpus and the rig.
 
-Alignment quality is risk #1 in the register: with N h in hand, it is the top quality lever
+Alignment quality is risk #1 in the register: with the corpus in hand, it is the top quality lever
 on the whole project. Worth doing properly rather than by ear.
 
 ## The problem this has to solve
@@ -82,7 +82,7 @@ Both.
 
 - **Failure rate** — songs where the aligner errors, times out, or returns nothing. A tool
   that is 5 ms better on average and falls over on 10% of songs is the worse tool.
-- **Wall-clock per song** on the rig. N h of corpus makes throughput a real constraint,
+- **Wall-clock per song** on the rig. corpus size makes throughput a real constraint,
   not a footnote.
 
 ## The separation-drift ablation (free, no ground truth needed)

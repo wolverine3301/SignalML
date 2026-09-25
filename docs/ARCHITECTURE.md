@@ -6,7 +6,7 @@
 >
 > **Updated 2026-07-07 after Logan answered Q1–Q12.** Confirmed decisions lost their WA
 > tags; the changed ones (Windows-first environment, MFA IPA phone set, adjustable
-> sample-rate profiles, own vocoder, English+Gaelic, N h corpus) are folded in below.
+> sample-rate profiles, own vocoder, English+Gaelic, private corpus) are folded in below.
 > Remaining open: Q13 (which Gaelic + sequencing), Q14 (lyrics transcript coverage).
 
 ---
@@ -27,7 +27,7 @@
 | Score format | **JSON score file** modeled on DiffSinger `.ds`; MIDI/MusicXML importers | ✅ Decided (Q3) |
 | Instrumental generation | **Symbolic-first** (MIDI gen + rendered instruments), sequenced last | ✅ Decided (Q8) |
 | Audio standard | **Config profiles**: 22.05 kHz `dev` for fast pipeline testing, 44.1 kHz `prod` for real training (Q11); mono float32 either way | ✅ Decided (Q11) — see §3.3 note |
-| Languages | **Language-agnostic pipeline; English first, Gaelic second wave** (N h female-vocal corpus exists) | Q13 pending (which Gaelic, sequencing) |
+| Languages | **Language-agnostic pipeline; English first, Gaelic second wave** (private corpus exists) | Q13 pending (which Gaelic, sequencing) |
 
 ---
 
@@ -129,8 +129,7 @@ learning-by-building rather than the working system. Flagged; not designed furth
 
 ### 3.3 Vocoder (decided, Q4: we train our own)
 
-- **Decision:** train our own NSF-HiFiGAN-class vocoder on the own corpus (N h is
-  ample; vocoder training doesn't need alignments, just clean audio — it can start as
+- **Decision:** train our own NSF-HiFiGAN-class vocoder on the own corpus (ample; vocoder training doesn't need alignments, just clean audio — it can start as
   soon as S3/S4 produce clean vocal stems, well before the acoustic model is ready).
   ~14M params; roughly 1–2 weeks from scratch on the 5090, less if seeded from an
   architecture-only (unweighted) config.
@@ -263,10 +262,9 @@ adds headroom for larger batches and bf16 throughput. Practices to bake in from 
 bf16 autocast, gradient accumulation as the batch-size escape hatch, single-GPU-first but
 DDP-compatible training loops (so multi-GPU later is a launch-flag change, not a rewrite),
 and checkpoint/EMA discipline. The real constraint is **data quality, not compute or
-volume** — Logan already holds **N h of curated female vocals** (English, plus **N h
-of Irish + Scottish Gaelic in separate folders, all with lyrics `.txt` sidecars** —
-Q13/Q14), which is *more* than the corpora behind most published SVS systems
-(Opencpop ≈ 5 h, M4Singer ≈ 30 h). At that volume the bottleneck shifts entirely to the
+volume** — the private corpus (English, plus Irish + Scottish Gaelic in separate
+folders, with lyrics `.txt` sidecars — Q13/Q14) is comparable to the corpora behind
+published SVS systems (Opencpop ≈ 5 h, M4Singer ≈ 30 h). At that volume the bottleneck shifts entirely to the
 pipeline: separation cleanliness, alignment accuracy, and per-singer labeling (the
 timbre space needs to know *which* singer each segment is — singer identity in the
 manifest is load-bearing, see §4). Vocoder training (own vocoder, §3.3) is data-hungry
@@ -275,8 +273,8 @@ alignment exists (wave-2) — feeds it from day one.
 
 ## 8. Risk register (top 5)
 
-1. **Alignment quality on separated vocals** is now the #1 quality lever (N h exists;
-   Q4 resolved the scarcity fear) → invest in P2–P5 quality checks, per-song alignment
+1. **Alignment quality on separated vocals** is now the #1 quality lever (the private corpus
+   resolved the scarcity fear, Q4) → invest in P2–P5 quality checks, per-song alignment
    confidence scores, and the MFA-vs-SOFA eval.
 2. ~~Lyrics transcript coverage unknown~~ **Resolved (Q14):** every song ships with a
    lyrics `.txt` — P5's coverage scan is a verification pass, not a backfill hunt.
@@ -285,13 +283,13 @@ alignment exists (wave-2) — feeds it from day one.
    (mitigation: license fields in manifest/run configs, dataset-card roll-ups).
 4. **Voice-bank novelty vs. quality tension** — sampled embeddings may sound averaged with
    few singers; mitigated by prioritizing singer *count* (how many distinct singers are
-   in the N h? — worth adding to the manifest early) and the flow-upgrade path (§4).
+   in the corpus? — worth adding to the manifest early) and the flow-upgrade path (§4).
    External corpora that could raise the *permissively licensed* singer count are surveyed
    in `docs/notes/candidate_corpora.md` — but run the singer census first; it may show the
    gap is already closed.
 5. **MFA on native Windows** is the stack's most fragile install (Q5 decision) —
    mitigated by SOFA as first fallback and an MFA-only WSL2 env as second (§2).
 6. **Gaelic alignment path** (Q13, resolved: wave-2 confirmed; both Irish `ga` and
-   Scottish `gd` exist, N h, lyrics included) — no pretrained MFA model for either;
+   Scottish `gd` exist, lyrics included) — no pretrained MFA model for either;
    custom dictionary/acoustic training happens only after the English model proves out.
    Until then Gaelic audio still earns its keep in vocoder training (alignment-free).

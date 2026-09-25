@@ -6,8 +6,10 @@ and the `training-rig-environment` memory; shipping is `transfer.md`.
 
 What changed since session 1, all on branch **`rig-day`** (merge to `main` + push first):
 
-- `full_v2` trains on **every** speaker (floor off: N singers / ~14.7 h instead of
-  49 / N h), minus five tags that are male leads or duets (`exclude_singers`).
+- `full_v2` trains on **every** speaker (floor off), minus tags that are male leads or duets
+  (`exclude_singers`, set in the gitignored `configs/dataset.full_v2.local.yaml`).
+  **Copy both `configs/dataset.*.local.yaml` overlays to the rig by hand** - git does
+  not carry them, and without them the build silently includes every singer.
 - `signalml harvest plan|inbox` — curated channels -> checklist -> hand
   download -> corpus layout + manifest, with the licence note in `license_note`.
 - `signalml lyrics` — Whisper lyrics for songs without a `lyrics.txt`.

@@ -154,11 +154,11 @@ class TestScan:
     def test_scan_song_folder_convention(self, tmp_path, make_wav):
         """One song per folder with lyrics.txt + META.txt siblings (corpus layout)."""
         root = tmp_path / "dr"
-        song_dir = root / "RAW" / "singer" / "song-IZ0"
-        make_wav(song_dir / "artist, singer - song (Lyrics)-IZ0.wav")
+        song_dir = root / "RAW" / "ivy lane" / "Glass Hearts-IZ0"
+        make_wav(song_dir / "Kestrel, Ivy Lane - Glass Hearts (Lyrics)-IZ0.wav")
         (song_dir / "lyrics.txt").write_text("we could fix it", encoding="utf-8")
         (song_dir / "META.txt").write_text(
-            "SONG:\nSINGER:singer\nARTIST:artist\nGENRE:edm\nTYPE:\nQUALITY:\n",
+            "SONG:\nSINGER:ivy lane\nARTIST:kestrel\nGENRE:edm\nTYPE:\nQUALITY:\n",
             encoding="utf-8")
 
         _, new = scan_directory(root, subpath="RAW", language="en", gender="F",
@@ -166,8 +166,8 @@ class TestScan:
         rec = new[0]
         assert rec.meta.has_lyrics is True
         assert rec.meta.lyrics_path.endswith("lyrics.txt")
-        assert rec.meta.singer == "singer"  # META.txt beats the CLI tag
-        assert rec.meta.song.startswith("artist")  # empty SONG: falls back to stem
+        assert rec.meta.singer == "ivy lane"  # META.txt beats the CLI tag
+        assert rec.meta.song.startswith("Kestrel")  # empty SONG: falls back to stem
         assert rec.meta.source_quality == "separated"
         assert rec.meta.genre == "edm"
         assert rec.meta.domain == "sung"  # default until DOMAIN: is tagged
@@ -183,7 +183,7 @@ class TestScan:
         meta.write_text("SINGER:june larke\nGENRE:pop\n", encoding="utf-8")
         manifest, _ = scan_directory(root, subpath="RAW")
         rec = manifest.records[0]
-        rec.meta.singer = "singer"  # the hand-fix
+        rec.meta.singer = "june lark"  # the hand-fix
         manifest.upsert(rec)
         manifest.save()
 
@@ -197,7 +197,7 @@ class TestScan:
         rec2 = Manifest.for_data_root(root).records[0]
         assert rec2.meta.processing == "heavy"
         assert rec2.meta.genre == "pop"
-        assert rec2.meta.singer == "singer"  # NOT clobbered back to the typo
+        assert rec2.meta.singer == "june lark"  # NOT clobbered back to the typo
         assert ("processing" in {c[1] for c in changes})
         assert warnings == []
 
@@ -285,7 +285,7 @@ class TestScan:
         from signalml.manifest import import_stem_folders
 
         root = tmp_path / "dr"
-        # existing record: a test_corpus-style full mix whose folder carries a yt id
+        # existing record: a full-mix record whose folder carries a yt id
         make_wav(root / "raw" / "old" / "Song A (Cover)-AAAAAAAAAAA" / "mix.wav")
         manifest, _ = scan_directory(root)
         manifest.save()

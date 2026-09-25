@@ -33,7 +33,7 @@ transcriber eventually — see OPEN_QUESTIONS "Future direction" and
 **The gap:** the singer trains on *score → audio*, so every training phrase needs not
 just phoneme timings (P5/MFA gives those) but **note labels**: which pitch, over which
 span, bound to which syllable, with slurs. The current pipeline extracts F0 curves
-(P4) but nothing turns "N h of aligned vocals" into **note-level training scores**.
+(P4) but nothing turns hours of aligned vocals into **note-level training scores**.
 Manual annotation at this scale is impossible.
 
 **What must be decided:** the singing-voice **note transcription** approach —
@@ -47,7 +47,7 @@ already has conventions for this) and D3 (phone-set/slur representation).
 expects `note_seq`/`note_dur` columns in transcriptions.csv; ecosystem tools are
 openvpi **SOME** + MakeDiffSinger `variance-temp-solution`/`midi-recognition`, with
 SlurCutter for manual fixes. Remaining input: the quality bake-off on 5–10 real
-separated vocals (the test_corpus corpus is processed and ready for this).
+separated vocals (the private test corpus is processed and ready for this).
 **Current lean:** ROSVOT/SOME from the openvpi ecosystem, since D2 already leans
 openvpi — but verify maintenance state at decision time. Note: the P7.5 overfit proof
 can start acoustic-only (ground-truth durations) before D1 is fully solved.
@@ -164,7 +164,7 @@ similarity guard → persisted profile). Once D2 lands, someone must map that on
 fork's actual multi-speaker mechanics (spk_id table? mix embeddings? conditioning
 points?), choose the embedding dimension, the density model (Gaussian first), the
 ECAPA verifier wiring, and the re-projection procedure after retrains. Also the
-**singer-count reality check**: census the N h corpus (how many distinct singers?)
+**singer-count reality check**: census the corpus (how many distinct singers?)
 — if it's < ~15 singers, novel-voice sampling quality is at risk and acquisition
 priorities should shift (more singers > more hours; ARCHITECTURE §4).
 

@@ -80,7 +80,7 @@ scripts/{binarize,train,infer}.py` — the interpreter path is a config value
   `syllable<TAB>ph ph ...` text file — *generated output* from `score/phoneset.py`,
   as planned. ⚠ Their docs say phoneme names "ASCII preferred", separators
   (`/ - + @ # & | < >`) forbidden. **Smoke test passed 2026-09-20** on the work PC:
-  their binarizer ingested all 87 IPA phones of `overfit_v1` (N clips / 1.N h)
+  their binarizer ingested all 87 IPA phones of `overfit_v1`
   and printed them back correctly, so the ASCII-transliteration fallback stays
   unbuilt. Two real snags, both fixed in the generated config, neither a patch:
   - `AP` (breath) and `SP` are *global* phonemes that always exist, and coverage is

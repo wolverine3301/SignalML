@@ -161,11 +161,31 @@ class DatasetRecipe(BaseModel):
     trainer_opts: TrainerOpts = Field(default_factory=TrainerOpts)
 
 
-def load_dataset_recipe(path: str | Path | None = None) -> DatasetRecipe:
+def _deep_merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for key, val in over.items():
+        out[key] = _deep_merge(out[key], val)             if isinstance(val, dict) and isinstance(out.get(key), dict) else val
+    return out
+
+
+def local_overlay_path(path: str | Path) -> Path:
+    """``dataset.x.yaml`` -> ``dataset.x.local.yaml`` beside it (gitignored)."""
+    path = Path(path)
+    return path.with_name(f"{path.stem}.local{path.suffix}")
+
+
+def load_dataset_recipe(path: str | Path | None = None, *, local: bool = True) -> DatasetRecipe:
+    """Load a recipe, deep-merging its gitignored ``.local.yaml`` overlay when present.
+
+    Anything that names the private corpus - which singers a run uses or excludes -
+    lives in the overlay, never in the tracked recipe (the repo is public). Dicts merge
+    key by key; lists and scalars in the overlay replace the base value."""
     path = Path(path) if path else CONFIGS_DIR / "dataset.yaml"
-    return DatasetRecipe.model_validate(
-        yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    )
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    overlay = local_overlay_path(path)
+    if local and overlay.exists():
+        data = _deep_merge(data, yaml.safe_load(overlay.read_text(encoding="utf-8")) or {})
+    return DatasetRecipe.model_validate(data)
 
 
 @dataclass

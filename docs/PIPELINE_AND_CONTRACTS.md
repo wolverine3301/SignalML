@@ -174,7 +174,7 @@ for audit. All other stages consume/update it.
 ### S5 · align — `signalml align` **(Q2 decided: MFA, IPA phone set)**
 | | |
 |---|---|
-| Input | `clean/vocals.wav` + lyrics text (from manifest/meta or sidecar `.txt`; coverage of the N h corpus = OPEN_QUESTIONS Q14) |
+| Input | `clean/vocals.wav` + lyrics text (from manifest/meta or sidecar `.txt`; corpus coverage = OPEN_QUESTIONS Q14) |
 | Tool | **MFA** (conda env, native Windows per Q5) with the **`english_mfa` IPA acoustic model + dictionary**; **SOFA** as singing-tuned fallback (P5 runs a head-to-head eval). Gaelic: no pretrained MFA model — custom dictionary/acoustic training, wave-2 (Q13) |
 | Output | aligner-native intermediate (`align/vocals.TextGrid`, kept for audit) → converted to **`align/phones.json`**: `[{"ph": "aɪ", "start": 1.02, "end": 1.19, "word": "I", "stress": 1}, ...]` with header `{"phone_set": "mfa_ipa/en_v1", "aligner": "mfa-3.x", "language": "en"}` |
 | Invariants | downstream stages read **only** `phones.json` — swapping aligners (or adding Gaelic) = one new converter/config, nothing downstream changes; alignment confidence recorded to `quality.align_score` so bad alignments can be excluded from training; `phone_set` is versioned to leave room for the future project-owned universal IPA subset (OPEN_QUESTIONS *Future direction*) |

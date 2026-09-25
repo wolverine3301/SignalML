@@ -290,13 +290,27 @@ class TestBuild:
         # both keep a permanent checkpoint ladder, whatever the rolling window does
         for opts in (overfit_opts, full_opts):
             assert opts.permanent_ckpt_start and opts.permanent_ckpt_interval
-        overfit = load_dataset_recipe(CONFIGS_DIR / "dataset.overfit.yaml")
-        assert len(overfit.filters.singers) == 3
-        # full_v2 trains on every speaker (the floor belongs to voice-bank sampling),
-        # but never on tags that are a male lead filed under a female-filtered name
-        full = load_dataset_recipe(CONFIGS_DIR / "dataset.full_v2.yaml")
+        # tracked recipes never name the private corpus: singer lists live in the
+        # gitignored .local.yaml overlays, so the public versions carry none
+        for name in ("dataset.overfit.yaml", "dataset.full_v2.yaml"):
+            public = load_dataset_recipe(CONFIGS_DIR / name, local=False)
+            assert public.filters.singers == [] and public.filters.exclude_singers == []
+        full = load_dataset_recipe(CONFIGS_DIR / "dataset.full_v2.yaml", local=False)
         assert full.filters.min_singer_minutes == 0.0
-        assert {"singer", "singer"} <= set(full.filters.exclude_singers)
+
+    def test_local_overlay_deep_merges(self, tmp_path):
+        base = tmp_path / "dataset.x.yaml"
+        base.write_text(
+            "name: x\n"
+            "filters:\n  gender: F\n  singers: []\n"
+            "trainer_opts:\n  max_batch_frames: 100\n", encoding="utf-8")
+        assert load_dataset_recipe(base).filters.singers == []
+        (tmp_path / "dataset.x.local.yaml").write_text(
+            "filters:\n  singers: [ann, bo]\n", encoding="utf-8")
+        merged = load_dataset_recipe(base)
+        assert merged.filters.singers == ["ann", "bo"] and merged.filters.gender == "F"
+        assert merged.trainer_opts.max_batch_frames == 100
+        assert load_dataset_recipe(base, local=False).filters.singers == []
 
     def test_ph_num_word_division(self, tmp_path, make_wav):
         """ph_num is phones-per-word: required for variance duration prediction and

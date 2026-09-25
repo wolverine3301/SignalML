@@ -6,7 +6,7 @@ their own status flags. Saves are atomic (write-temp -> replace).
 
 ``scan_directory`` is the S2 backfill command: it proposes records for audio already
 sitting in ``raw/`` (checksum, duration, lyrics-sidecar detection per Q14) so the
-existing N h corpus can be onboarded without re-downloading anything.
+existing corpus can be onboarded without re-downloading anything.
 """
 
 from __future__ import annotations
@@ -391,7 +391,7 @@ def scan_directory(
                 language=language,
                 gender=gender,
                 # singer is the timbre-space label key (ARCHITECTURE §4): normalize
-                # case/whitespace so "singer" and "singer" are one singer, not two
+                # case/whitespace so "ANNA" and "anna" are one singer, not two
                 singer=_normalize_singer(sidecar.get("SINGER") or singer),
                 license_note=sidecar.get("LICENSE"),
                 has_lyrics=lyrics is not None,

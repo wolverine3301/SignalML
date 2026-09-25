@@ -74,7 +74,7 @@ Non-negotiables, so this never becomes the thing that breaks a stage:
   fail an 8-hour job.
 - **No signature changes**: stages keep returning their existing summary objects, so
   the contract tests in `tests/` are untouched.
-- `time.perf_counter()` only. Overhead is ~1 µs per phase; at N clips that is
+- `time.perf_counter()` only. Overhead is ~1 µs per phase; at thousands of clips that is
   under 10 ms total.
 
 ## Phases worth naming

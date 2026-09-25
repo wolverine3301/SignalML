@@ -24,11 +24,9 @@ filters:
   exclude_processing: [heavy]
   corpora: []
   exclude_corpora: []
-  # the three heaviest singers in full_acoustic_v1 (most clipped minutes)
-  singers:
-    - singer
-    - singer
-    - singer
+  # which singers: set in configs/dataset.overfit.local.yaml (gitignored - names from
+  # the private corpus never go in the public repo). Pick the three heaviest speakers.
+  singers: []
   min_singer_minutes: 0.0
   ids: []
 
