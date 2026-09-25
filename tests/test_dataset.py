@@ -461,6 +461,21 @@ class TestBuild:
         assert summary.songs_used == [keep]
         assert summary.skipped[pooled] == "singer 'some producer' excluded by recipe"
 
+    def test_machine_lyrics_switch(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        human = _ready_song(root, make_wav, singer="alice")
+        asr = _ready_song(root, make_wav, singer="bea")
+        manifest = Manifest.for_data_root(root)
+        rec = manifest.get(asr)
+        rec.meta.lyrics_source = "asr:large-v3"
+        manifest.upsert(rec)
+        manifest.save()
+        both = build(root, recipe=recipe(name="t_all"))
+        assert sorted(both.songs_used) == sorted([human, asr])
+        only = build(root, recipe=recipe(name="t_h", filters={"machine_lyrics": False}))
+        assert only.songs_used == [human]
+        assert only.skipped[asr] == "machine lyrics (asr) excluded by recipe"
+
     def test_null_gender_refused(self, tmp_path, make_wav):
         root = tmp_path / "dr"
         make_wav(root / "raw" / "x.wav")

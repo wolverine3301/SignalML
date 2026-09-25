@@ -59,6 +59,11 @@ class DatasetFilters(BaseModel):
     # Tags that are not one voice: a producer credited as the singer pools several
     # featured vocalists into one spk_id, which is worse than leaving them out.
     exclude_singers: list[str] = []
+    # Songs whose lyrics came from ASR (meta.lyrics_source "asr:...", S5a). Measured
+    # 2026-09-25: alignments from Whisper lyrics agree with hand-lyrics alignments on
+    # only ~58% of sung time, and align_score cannot tell (it reads ~1.0 either way).
+    # False keeps a run on human lyrics only; True admits machine-lyric songs.
+    machine_lyrics: bool = True
     # Drop a speaker whole when its *clipped* audio falls under this (0 = keep all).
     # Measured after segmentation, never on manifest duration: raw vocals are ~44%
     # silence and sub-minimum fragments, so a singer who reads as 5 minutes in the
@@ -338,6 +343,8 @@ def _select(manifest: Manifest, recipe: DatasetRecipe, summary: BuildSummary,
             reason = "singer not in recipe whitelist"
         elif rec.meta.singer in f.exclude_singers:
             reason = f"singer {rec.meta.singer!r} excluded by recipe"
+        elif not f.machine_lyrics and (rec.meta.lyrics_source or "").startswith("asr:"):
+            reason = "machine lyrics (asr) excluded by recipe"
         elif rec.meta.singer is None:
             reason = "singer is null — the timbre space needs singer labels"
         elif rec.meta.processing in f.exclude_processing:

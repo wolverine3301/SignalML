@@ -84,9 +84,22 @@ signalml align
 signalml manifest report
 ```
 
-Check before building: new songs' `align_score` distribution, and the `FLAG` lines from
-`lyrics` (a line repeated 4+ times in a row is usually a Whisper loop). The recipe's
-`min_align_score: 0.8` is the gate; don't lower it to rescue machine-lyric songs.
+**Machine lyrics are not trustworthy for timing yet** (measured overnight on 15 songs
+with hand-corrected lyrics): Whisper finds ~90% of the words (median word error ~19%),
+but MFA alignments made from its lyrics agree with the hand-lyrics alignments on only
+**~58% of sung time** (control: re-aligning the hand lyrics reproduces 99.8%, so the
+metric is sound). `align_score` cannot see this - it reads ~1.0 either way. Part of the
+gap is likely incomplete old references (a chorus written once), unquantified. Tried and
+rejected: anti-loop guards (no gain), aligning per Whisper segment (21% - Whisper's
+timestamps drift on singing).
+
+So: the dataset recipe has `filters.machine_lyrics` (default true). Options, best first:
+1. Skim-correct the Whisper drafts (`songs/<id>/lyrics/lyrics.txt`) for the permitted
+   songs - correcting a ~90%-right draft is far faster than typing - then re-align.
+   A corrected file is still tagged asr; fine, or clear `lyrics_source` by hand.
+2. Train full_v2 with `machine_lyrics: false` (hand-lyrics songs only) and treat the
+   harvest as the next run's data.
+3. Admit them unreviewed - only as a deliberate A/B against option 2.
 
 ## 5. Build + train
 
