@@ -97,7 +97,7 @@ def _cmd_harvest_plan(args: argparse.Namespace) -> int:
     print(f"checklist: {mpath}")
     print(f"plan:      {jpath}")
     if not plan.license:
-        print("NOTE: no --license given; record the licence note so it reaches "
+        print("NOTE: no --license given; record the licence terms so they reach "
               "license_note")
     return 0
 
@@ -1084,7 +1084,8 @@ def main(argv: list[str] | None = None) -> int:
     hplan_p.add_argument("--versions", type=int, default=1,
                          help="max versions of one song (default 1)")
     hplan_p.add_argument("--prefer", action="append", default=None,
-                         help="regex ranked above everything else, e.g. SERIES (repeatable)")
+                         help="regex ranked above everything else, e.g. a channel's own "
+                              "session-series name (repeatable)")
     hplan_p.add_argument("--license", default=None,
                          help="licence note recorded as license_note")
     hplan_p.add_argument("--gender", default="F", choices=["F", "M"])

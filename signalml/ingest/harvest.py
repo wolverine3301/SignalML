@@ -1,5 +1,5 @@
-"""Channel harvest — plan what to take from a curated's channel, then ingest
-what Logan downloaded by hand.
+"""Channel harvest — plan what to take from a curated channel, then ingest what was
+downloaded by hand.
 
 Two halves around one manual step. ``plan`` lists a channel (metadata only — listing
 works where downloading is refused) and keeps solo, unprocessed-sounding singing: no
@@ -8,7 +8,7 @@ per song; intimate recordings ranked first; a cap per singer so one voice cannot
 dominate the timbre space. ``ingest`` takes whatever audio lands in an inbox folder,
 matches it to a plan by video id (or title), and writes the corpus layout the rest of
 the pipeline already reads: ``RAW/<batch>/<singer>/<title>-<id>/<title>-<id>.wav`` plus
-a ``META.txt`` carrying singer, source URL and the licence note (-> license_note).
+a ``META.txt`` carrying singer, source URL and a licence note (-> license_note).
 
 The downloading itself stays manual: YouTube refuses automated downloads from the
 work PC, and working around that is not something this code does.
@@ -94,7 +94,7 @@ def _strip_singer(title: str, singer: str) -> str:
 
 def song_key(title: str, singer: str) -> str:
     """The song a title is a version *of* — the unit the one-version-per-song cap counts.
-    'singer - Stay (SERIES Version)' and 'Stay (Live Acoustic)' are both 'stay'."""
+    'Artist - Stay (Porch Version)' and 'Stay (Live Acoustic)' are both 'stay'."""
     t = _strip_singer(title, singer)
     t = re.sub(r"\(.*?\)|\[.*?\]|\|.*$|\".*?\"", " ", t)
     t = t.split(" - ")[-1] if " - " in t else t
@@ -107,7 +107,7 @@ def song_key(title: str, singer: str) -> str:
 def skip_reason(e: Entry, singer: str, *, have_ids: set[str],
                 prefer: list[str] = ()) -> str | None:
     """Why an upload is not solo, natural-sounding singing — or None to keep it.
-    ``prefer`` patterns (a channel's own name for its acoustic series, e.g. SERIES) count
+    ``prefer`` patterns (a channel's own name for its acoustic series) count
     as a keep marker, like "acoustic" does."""
     t = e.title
     rest = _strip_singer(t, singer)

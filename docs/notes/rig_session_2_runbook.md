@@ -1,6 +1,6 @@
 # Rig session 2 — runbook (drafted 2026-09-24 night)
 
-Goal: grow the English singing corpus with curated songs, then start the long
+Goal: grow the English singing corpus with curated channel songs, then start the long
 `full_acoustic_v2` run. Rig facts (host, SSH, detaching) are in `rig_session_2026-09-20.md`
 and the `training-rig-environment` memory; shipping is `transfer.md`.
 
@@ -25,8 +25,8 @@ What changed since session 1, all on branch **`rig-day`** (merge to `main` + pus
 
 ```powershell
 $env:SIGNALML_DATA_ROOT = 'Y:\SignalAI\DATA_ROOT'   # NOT DATA_ROOT - unset = silently ./data
-# one plan per channel (metadata only; existing plans are in acquire_lists):
-python -m uv run signalml harvest plan --channel <url> --singer "singer" --license "used with the licence note"
+# one plan per channel (metadata only; existing plans are in DATA_ROOTcquire_lists):
+python -m uv run signalml harvest plan --channel <url> --singer "<name>" --license "<licence note>"
 # download each checklist (DATA_ROOT\acquire_lists\*.md) into DATA_ROOT\inbox, then:
 python -m uv run signalml harvest inbox --inbox Y:\SignalAI\DATA_ROOT\inbox
 ```
@@ -94,7 +94,7 @@ rejected: anti-loop guards (no gain), aligning per Whisper segment (21% - Whispe
 timestamps drift on singing).
 
 So: the dataset recipe has `filters.machine_lyrics` (default true). Options, best first:
-1. Skim-correct the Whisper drafts (`songs/<id>/lyrics/lyrics.txt`) for the permitted
+1. Skim-correct the Whisper drafts (`songs/<id>/lyrics/lyrics.txt`) for the harvested
    songs - correcting a ~90%-right draft is far faster than typing - then re-align.
    A corrected file is still tagged asr; fine, or clear `lyrics_source` by hand.
 2. Train full_v2 with `machine_lyrics: false` (hand-lyrics songs only) and treat the
