@@ -472,6 +472,23 @@ def _cmd_score_segments(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_score_to_ds(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from .score import load_score
+    from .score.to_ds import score_to_ds, write_ds
+
+    score = load_score(args.score)
+    segments = score_to_ds(score, mode=args.ph_num_mode, pad_sec=args.pad,
+                           min_rest_sec=args.min_rest)
+    out = Path(args.out) if args.out else Path(args.score).with_suffix(".ds")
+    write_ds(segments, out)
+    print(f"{args.score} -> {out}: {len(segments)} segment(s), ph_num {args.ph_num_mode}")
+    print("render: variance (--predict dur pitch) then acoustic, e.g. from "
+          "third_party/DiffSinger: python scripts/infer.py variance <ds> --exp <var_exp>")
+    return 0
+
+
 def _cmd_score_upgrade(args: argparse.Namespace) -> int:
     import json as _json
     from pathlib import Path
@@ -1195,6 +1212,20 @@ def main(argv: list[str] | None = None) -> int:
     segments_p.add_argument("--compare", default=None, metavar="EDITED.json",
                             help="an edited score: report what would need re-rendering")
     segments_p.set_defaults(func=_cmd_score_segments)
+    to_ds_p = score_sub.add_parser(
+        "to-ds", help="score.json -> DiffSinger .ds (variance + acoustic inference input)")
+    to_ds_p.add_argument("score", help="score.json path")
+    to_ds_p.add_argument("-o", "--out", default=None, help="output .ds (default: beside)")
+    to_ds_p.add_argument("--ph-num-mode", default="vowel_onset",
+                         choices=["vowel_onset", "syllable"],
+                         help="phone grouping; must match the variance dataset's "
+                              "segmentation.ph_num_mode (default: vowel_onset)")
+    to_ds_p.add_argument("--pad", type=float, default=0.5,
+                         help="rest before/after each phrase in seconds (default 0.5)")
+    to_ds_p.add_argument("--min-rest", type=float, default=DEFAULT_MIN_REST_SEC,
+                         help=f"rest length that opens a new phrase "
+                              f"(default: {DEFAULT_MIN_REST_SEC}s)")
+    to_ds_p.set_defaults(func=_cmd_score_to_ds)
     upgrade_p = score_sub.add_parser(
         "upgrade", help="rewrite score.json at the current format (mints note ids)"
     )
