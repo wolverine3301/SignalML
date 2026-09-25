@@ -12,6 +12,15 @@
 **No open questions right now.** Implementation has started (Migration Plan P0,
 2026-07-07). New questions will appear here as they arise.
 
+## Follow-ups (not decisions)
+
+- **Voice-bank speaker floor** (2026-09-24): `full_acoustic_v2` now trains on every
+  speaker (the 5-minute floor moved out of the dataset recipe for backbone quality). The
+  floor still matters when the voice bank fits its sampling distribution: speakers with
+  under ~5 clipped minutes have embeddings that render as the corpus average and should
+  not seed sampled voices or anchor the ECAPA novelty guard. `signalml/voices/` does not
+  enforce this yet; do it before the first `voice new` against a v2 checkpoint.
+
 ## Future direction (endorsed, revisit when data/compute grows)
 
 - **Universal phoneme set as a "pronunciation guide" for any language** (Logan's idea,

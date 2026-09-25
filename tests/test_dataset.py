@@ -290,8 +290,11 @@ class TestBuild:
             assert opts.permanent_ckpt_start and opts.permanent_ckpt_interval
         overfit = load_dataset_recipe(CONFIGS_DIR / "dataset.overfit.yaml")
         assert len(overfit.filters.singers) == 3
-        assert load_dataset_recipe(
-            CONFIGS_DIR / "dataset.full_v2.yaml").filters.min_singer_minutes == 5.0
+        # full_v2 trains on every speaker (the floor belongs to voice-bank sampling),
+        # but never on tags that are a male lead filed under a female-filtered name
+        full = load_dataset_recipe(CONFIGS_DIR / "dataset.full_v2.yaml")
+        assert full.filters.min_singer_minutes == 0.0
+        assert {"singer", "singer"} <= set(full.filters.exclude_singers)
 
     def test_ph_num_word_division(self, tmp_path, make_wav):
         """ph_num is phones-per-word: required for variance duration prediction and
@@ -415,6 +418,17 @@ class TestBuild:
         assert sorted(summary.songs_used) == sorted([own, borrowed])
         card = (summary.out_dir / "dataset_card.md").read_text(encoding="utf-8")
         assert "- own" in card and "- medleydb" in card
+
+    def test_exclude_singers(self, tmp_path, make_wav):
+        """A tag that pools several real vocalists (a producer credited as the singer)
+        is dropped by name, all of its songs, and the skip says why."""
+        root = tmp_path / "dr"
+        keep = _ready_song(root, make_wav, singer="alice")
+        pooled = _ready_song(root, make_wav, singer="some producer")
+        summary = build(root, recipe=recipe(
+            name="t_excl_spk", filters={"exclude_singers": ["some producer"]}))
+        assert summary.songs_used == [keep]
+        assert summary.skipped[pooled] == "singer 'some producer' excluded by recipe"
 
     def test_null_gender_refused(self, tmp_path, make_wav):
         root = tmp_path / "dr"

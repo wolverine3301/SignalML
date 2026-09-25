@@ -54,6 +54,9 @@ class DatasetFilters(BaseModel):
     min_align_score: float = 0.8
     exclude_processing: list[str] = ["heavy"]
     singers: list[str] = []  # empty = all singers
+    # Tags that are not one voice: a producer credited as the singer pools several
+    # featured vocalists into one spk_id, which is worse than leaving them out.
+    exclude_singers: list[str] = []
     # Drop a speaker whole when its *clipped* audio falls under this (0 = keep all).
     # Measured after segmentation, never on manifest duration: raw vocals are ~44%
     # silence and sub-minimum fragments, so a singer who reads as 5 minutes in the
@@ -307,6 +310,8 @@ def _select(manifest: Manifest, recipe: DatasetRecipe, summary: BuildSummary,
             reason = f"corpus {rec.meta.corpus!r} excluded by recipe"
         elif f.singers and rec.meta.singer not in f.singers:
             reason = "singer not in recipe whitelist"
+        elif rec.meta.singer in f.exclude_singers:
+            reason = f"singer {rec.meta.singer!r} excluded by recipe"
         elif rec.meta.singer is None:
             reason = "singer is null — the timbre space needs singer labels"
         elif rec.meta.processing in f.exclude_processing:

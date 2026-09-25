@@ -12,7 +12,7 @@ docs below are the source of truth. **Rig session 1 (2026-09-20) is done**: over
 trained to 20k steps, acoustic resynthesis works end to end. Next actions: **D1** (note
 labels via SOME — without them there is no variance model, so the system re-sings
 existing takes but cannot sing a new score), then rig session 2 =
-`full_acoustic_v2` (N singers, N h; ship `corpus`, rebuild the dataset *there* since
+`full_acoustic_v2` (speaker floor off since 2026-09-24: N singers, ~14.7 h; ship `corpus`, rebuild the dataset *there* since
 generated configs carry absolute paths), and **P7.4** (openvpi/SingingVocoders is
 **not yet vendored**, so every render is still NC-licensed). NOTE:
 development happens on Logan's laptop (GTX 1650) and the 2080S work PC; heavy/GPU work
