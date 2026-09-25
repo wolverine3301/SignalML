@@ -1,0 +1,26 @@
+# S5a lyrics - Whisper transcripts for songs that arrive without a lyrics.txt (Q14).
+#
+# The backend is an EXTERNAL tool in its own venv (faster-whisper), run by command like
+# MFA and the trainer. {jobs} is replaced with a batch file; one invocation per batch so
+# the ~3 GB model loads once. Machine wiring goes in configs/lyrics.local.yaml
+# (gitignored), e.g. on the work PC:
+#
+#   command:
+#     - "Y:/SignalAI/tools/whisper/.venv/Scripts/python.exe"
+#     - "Y:/SignalAI/SignalML-main/scripts/whisper_lyrics.py"
+#     - "--model"
+#     - "Y:/SignalAI/tools/whisper/large-v3"
+#     - "--jobs"
+#     - "{jobs}"
+#
+# Setup: python -m uv venv <tools>/whisper/.venv --python 3.12
+#        python -m uv pip install --python <tools>/whisper/.venv/Scripts/python.exe faster-whisper
+#        then download large-v3 (faster_whisper.utils.download_model).
+# GPU on Windows additionally needs the CUDA 12 cuBLAS + cuDNN 9 DLLs on PATH; without
+# them pass `--device cpu` (~2x realtime on a 12-core CPU).
+
+command: []
+stem: vocals
+language: en
+min_words: 8
+timeout_sec: 21600

@@ -53,7 +53,7 @@ CODE_SUBDIR = ".ship"  # where code items land inside the receiving repo
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-What = Literal["dataset", "rebuildable", "full", "code"]
+What = Literal["dataset", "rebuildable", "full", "unprocessed", "code"]
 Dest = Literal["data", "code"]
 
 # clip names in transcriptions.csv are "<song_id>_<NNN>"
@@ -285,6 +285,7 @@ def build_plan(
     with_code: bool = True,
     with_features: bool = False,
     with_raw: bool = False,
+    prefix: str | None = None,
     allow_dirty: bool = False,
     repo_root: str | Path = REPO_ROOT,
     progress: bool = True,
@@ -314,6 +315,29 @@ def build_plan(
 
     def add(dest: str, rel: str, src: Path, kind: str = "file", staged: bool = False):
         sources.append((dest, rel, src, kind, staged))
+
+    if what == "unprocessed":
+        # Songs that still need the front half of the pipeline (separate -> clean ->
+        # lyrics -> align) on the rig: the as-provided audio, its sidecars and the
+        # records. ids are minted HERE, so the rig never invents one that collides.
+        manifest = Manifest.for_data_root(data_root)
+        subset = [r for r in manifest.records
+                  if not r.status.aligned and (not prefix or r.file.path.startswith(prefix))]
+        if not subset:
+            raise RuntimeError(
+                f"no unaligned songs{f' under {prefix}' if prefix else ''} - nothing to ship")
+        plan.song_ids = [r.id for r in subset]
+        for rec in subset:
+            audio = data_root / rec.file.path
+            if audio.exists():
+                add("data", rec.file.path, audio)
+            for side in (audio.with_suffix(".txt"), audio.parent / "lyrics.txt",
+                         audio.parent / "META.txt"):
+                if side.exists():
+                    add("data", side.relative_to(data_root).as_posix(), side)
+        add("data", MANIFEST_NAME,
+            _write_manifest_subset(subset, stage / "manifest.subset.jsonl"),
+            kind="manifest", staged=True)
 
     if what in ("dataset", "rebuildable", "full"):
         if not (data_root / MANIFEST_NAME).exists():
