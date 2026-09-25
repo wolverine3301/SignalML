@@ -324,7 +324,8 @@ def _processing_from_sidecar(sidecar: dict[str, str]) -> str | None:
 
 def _read_meta_sidecar(audio_path: Path) -> dict[str, str]:
     """Parse a ``META.txt`` next to the audio (corpus convention): ``KEY:value`` lines
-    (SONG/SINGER/ARTIST/GENRE/TYPE/QUALITY/CORPUS). Empty values are dropped."""
+    (SONG/SINGER/ARTIST/GENRE/TYPE/QUALITY/CORPUS, plus LICENSE -> license_note and
+    SOURCE_URL -> source.url for harvested songs). Empty values are dropped."""
     meta_path = audio_path.parent / "META.txt"
     if not meta_path.exists():
         return {}
@@ -369,9 +370,11 @@ def scan_directory(
         duration, sr, channels = probe_audio(path)
         lyrics = _find_lyrics_sidecar(path)
         sidecar = _read_meta_sidecar(path)  # per-song META.txt beats the blanket CLI tags
+        url = sidecar.get("SOURCE_URL")
         rec = ManifestRecord(
             id=manifest.next_id(),
-            source=SourceInfo(kind="local"),
+            source=SourceInfo(kind="youtube" if url and "youtu" in url else
+                              "other" if url else "local", url=url),
             file=FileInfo(
                 path=path.relative_to(data_root).as_posix(),
                 sha256=digest,
@@ -386,6 +389,7 @@ def scan_directory(
                 # singer is the timbre-space label key (ARCHITECTURE §4): normalize
                 # case/whitespace so "singer" and "singer" are one singer, not two
                 singer=_normalize_singer(sidecar.get("SINGER") or singer),
+                license_note=sidecar.get("LICENSE"),
                 has_lyrics=lyrics is not None,
                 lyrics_path=lyrics.relative_to(data_root).as_posix() if lyrics else None,
                 source_quality=source_quality,

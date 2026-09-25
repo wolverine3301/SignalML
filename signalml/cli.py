@@ -13,6 +13,7 @@ import sys
 STAGES: dict[str, tuple[str, str]] = {
     "acquire": ("P1", "download audio via yt-dlp into raw/ + manifest records"),
     "manifest": ("P1", "manifest utilities (scan/backfill)"),
+    "harvest": ("P1", "curated channels: plan, then ingest hand downloads"),
     "separate": ("P2", "stem separation with Demucs htdemucs_ft"),
     "clean": ("P3", "resample/loudness-normalize/filter vocal stems"),
     "align": ("P5", "MFA alignment -> align/phones.json (MFA IPA)"),
@@ -26,7 +27,7 @@ STAGES: dict[str, tuple[str, str]] = {
     "render": ("P9", "render MIDI backing tracks (symbolic-first instrumental)"),
 }
 
-_IMPLEMENTED = {"manifest", "acquire", "separate", "clean", "features", "align", "score",
+_IMPLEMENTED = {"manifest", "acquire", "harvest", "separate", "clean", "features", "align", "score",
                 "dataset", "train", "transcribe"}
 
 
@@ -71,6 +72,58 @@ def _cmd_acquire(args: argparse.Namespace) -> int:
     for url, err in summary.failed.items():
         print(f"  FAILED {url}: {err}", file=sys.stderr)
     return 0 if not summary.failed else 1
+
+
+def _cmd_harvest_plan(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from .ingest.harvest import corpus_youtube_ids, list_channel, plan_channel, save_plan
+    from .manifest import Manifest, resolve_data_root
+
+    data_root = resolve_data_root(args.data_root)
+    entries = list_channel(args.channel)
+    have = corpus_youtube_ids(Manifest.for_data_root(data_root))
+    plan = plan_channel(entries, args.singer, channel=args.channel, have_ids=have,
+                        cap=args.cap, versions=args.versions, prefer=args.prefer or [],
+                        license=args.license, gender=args.gender)
+    out = Path(args.out) if args.out else data_root / "acquire_lists"
+    jpath, mpath = save_plan(plan, out)
+    mins = sum(e.duration for e in plan.picked) / 60
+    print(f"harvest plan {plan.singer}: {len(entries)} uploads -> {len(plan.picked)} songs "
+          f"({mins:.0f} min)")
+    for e in plan.picked:
+        print(f"  {e.duration // 60}:{e.duration % 60:02d}  {e.title}")
+    print(f"checklist: {mpath}")
+    print(f"plan:      {jpath}")
+    if not plan.license:
+        print("NOTE: no --license given; record the licence note so it reaches "
+              "license_note")
+    return 0
+
+
+def _cmd_harvest_inbox(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from .ingest.harvest import PLAN_SUFFIX, ingest_inbox, load_plans
+    from .manifest import resolve_data_root
+
+    data_root = resolve_data_root(args.data_root)
+    plan_paths = [Path(p) for p in args.plan] if args.plan else \
+        sorted((data_root / "acquire_lists").glob(f"*{PLAN_SUFFIX}"))
+    if not plan_paths:
+        print("harvest inbox: no plans found - run `signalml harvest plan` first",
+              file=sys.stderr)
+        return 1
+    s = ingest_inbox(data_root, Path(args.inbox), load_plans(plan_paths), batch=args.batch)
+    print(f"harvest inbox: {len(s.placed)} placed, {len(s.already_present)} already present, "
+          f"{len(s.new_records)} new manifest records, {len(s.unmatched)} unmatched")
+    for f in s.unmatched:
+        print(f"  UNMATCHED {f.name}  (no plan id or unique title in the name)")
+    for singer, miss in s.missing.items():
+        print(f"  still missing for {singer}: {len(miss)}")
+        for e in miss:
+            print(f"    {e.url}  {e.title}")
+    return 0
 
 
 def _cmd_separate(args: argparse.Namespace) -> int:
@@ -977,6 +1030,41 @@ def main(argv: list[str] | None = None) -> int:
                            help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
     acquire_p.add_argument("--language", default=None, help="tag new records, e.g. en/ga/gd")
     acquire_p.set_defaults(func=_cmd_acquire)
+
+    # harvest - curated channels: plan (metadata) -> manual download -> inbox
+    harvest_p = subparsers.add_parser(
+        "harvest", help="[P1] plan a channel harvest; ingest hand-downloaded audio")
+    harvest_sub = harvest_p.add_subparsers(dest="harvest_cmd", required=True)
+    hplan_p = harvest_sub.add_parser(
+        "plan", help="list a channel (metadata only) and pick solo acoustic/live songs")
+    hplan_p.add_argument("--channel", required=True, help="YouTube channel URL")
+    hplan_p.add_argument("--singer", required=True, help="singer tag (lowercase name)")
+    hplan_p.add_argument("--cap", type=int, default=25,
+                         help="max songs for this singer (default 25 - one voice must not "
+                              "dominate the timbre space)")
+    hplan_p.add_argument("--versions", type=int, default=1,
+                         help="max versions of one song (default 1)")
+    hplan_p.add_argument("--prefer", action="append", default=None,
+                         help="regex ranked above everything else, e.g. SERIES (repeatable)")
+    hplan_p.add_argument("--license", default=None,
+                         help="licence note recorded as license_note")
+    hplan_p.add_argument("--gender", default="F", choices=["F", "M"])
+    hplan_p.add_argument("--out", default=None,
+                         help="plan/checklist dir (default: DATA_ROOT/acquire_lists)")
+    hplan_p.add_argument("--data-root", default=None,
+                         help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    hplan_p.set_defaults(func=_cmd_harvest_plan)
+    hinbox_p = harvest_sub.add_parser(
+        "inbox", help="match hand-downloaded files to plans, place them, add to manifest")
+    hinbox_p.add_argument("--inbox", required=True, help="folder the downloads land in")
+    hinbox_p.add_argument("--plan", action="append", default=None,
+                          help="plan .json (repeatable; default: every plan in "
+                               "DATA_ROOT/acquire_lists)")
+    hinbox_p.add_argument("--batch", default="harvest",
+                          help="RAW/<batch>/ folder for placed songs (default: harvest)")
+    hinbox_p.add_argument("--data-root", default=None,
+                          help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    hinbox_p.set_defaults(func=_cmd_harvest_inbox)
 
     # separate
     separate_p = subparsers.add_parser("separate", help="[P2] Demucs stem separation")

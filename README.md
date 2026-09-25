@@ -98,6 +98,10 @@ python -m uv run signalml manifest report --data-root D:\data
 python -m uv run signalml manifest retag --data-root D:\data
 # download new audio:
 python -m uv run signalml acquire --urls urls.txt --data-root D:\data
+# curated channels: pick solo acoustic/live songs (metadata only), download the
+# checklist by hand into an inbox, then place + tag + add to the manifest:
+python -m uv run signalml harvest plan --channel <channel-url> --singer "name" --prefer SERIES --license "licence note"
+python -m uv run signalml harvest inbox --inbox D:\inbox --data-root D:\data
 # separate stems (Demucs; resumable, idempotent):
 python -m uv run signalml separate --data-root D:\data
 # clean + featurize (profile-aware):
