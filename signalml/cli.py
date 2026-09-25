@@ -17,6 +17,7 @@ STAGES: dict[str, tuple[str, str]] = {
     "clean": ("P3", "resample/loudness-normalize/filter vocal stems"),
     "align": ("P5", "MFA alignment -> align/phones.json (MFA IPA)"),
     "score": ("P6", "score JSON tools: validate / from-midi / phoneset"),
+    "lyrics": ("P5a", "Whisper lyrics for songs without a lyrics.txt (Q14)"),
     "transcribe": ("P5b", "note labels for the variance model (D1)"),
     "features": ("P4", "mel/F0/BPM/key feature extraction"),
     "dataset": ("P7", "build binarized training datasets from the manifest"),
@@ -27,7 +28,7 @@ STAGES: dict[str, tuple[str, str]] = {
 }
 
 _IMPLEMENTED = {"manifest", "acquire", "separate", "clean", "features", "align", "score",
-                "dataset", "train", "transcribe"}
+                "dataset", "train", "transcribe", "lyrics"}
 
 
 def _cmd_manifest_scan(args: argparse.Namespace) -> int:
@@ -534,6 +535,26 @@ def _cmd_train_status(args: argparse.Namespace) -> int:
     else:
         print(format_status(summary))
     return 1 if summary.get("error") and not summary.get("step") else 0
+
+
+def _cmd_lyrics(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .stages.lyrics import load_lyrics_config, run
+
+    summary = run(
+        resolve_data_root(args.data_root),
+        cfg=load_lyrics_config(args.config),
+        force=args.force,
+        limit=args.limit,
+        ids=args.ids or None,
+    )
+    print(f"lyrics: {len(summary.written)} written, {len(summary.flagged)} flagged, "
+          f"{len(summary.failed)} failed, {len(summary.skipped)} skipped")
+    for rid, why in sorted(summary.flagged.items()):
+        print(f"  FLAG {rid}: {why}")
+    for rid, why in sorted(summary.failed.items()):
+        print(f"  FAILED {rid}: {why}", file=sys.stderr)
+    return 1 if summary.failed and not summary.written else 0
 
 
 def _cmd_transcribe(args: argparse.Namespace) -> int:
@@ -1175,6 +1196,20 @@ def main(argv: list[str] | None = None) -> int:
     status_p.add_argument("--json", action="store_true",
                           help="emit the full summary as JSON")
     status_p.set_defaults(func=_cmd_train_status)
+
+    # lyrics - S5a machine lyrics (Q14)
+    ly_p = subparsers.add_parser(
+        "lyrics", help="[P5a] Whisper lyrics for cleaned songs that have none")
+    ly_p.add_argument("--data-root", default=None,
+                      help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    ly_p.add_argument("--config", default=None,
+                      help="backend wiring yaml (default: configs/lyrics.yaml)")
+    ly_p.add_argument("--force", action="store_true",
+                      help="redo MACHINE lyrics (hand-written ones are never replaced)")
+    ly_p.add_argument("--limit", type=int, default=None, help="stop after this many songs")
+    ly_p.add_argument("--ids", nargs="*", default=None,
+                      help="explicit song ids instead of a manifest query")
+    ly_p.set_defaults(func=_cmd_lyrics)
 
     # transcribe — S5b note labels (D1)
     tr_p = subparsers.add_parser(

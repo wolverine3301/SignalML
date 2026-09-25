@@ -56,6 +56,10 @@ class MetaInfo(BaseModel):
     license_note: str | None = None
     has_lyrics: bool = False  # Q14: .txt sidecar next to the audio
     lyrics_path: str | None = None
+    # where the lyrics came from: None = a human sidecar (the original corpus, hand-
+    # corrected); "asr:<model>" = S5a machine transcript, which is never allowed to
+    # overwrite a human one
+    lyrics_source: str | None = None
     # "studio" = real dry stems (gold for vocoder training); "separated" = Demucs output
     # with the mix's production baked in. Dataset recipes filter/weight on this.
     source_quality: Literal["studio", "separated"] | None = None
