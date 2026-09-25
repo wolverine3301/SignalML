@@ -54,7 +54,7 @@ _NON_LATIN = re.compile(r"[Ͱ-ϿЀ-ӿ֐-ۿऀ-෿"
 # rank order: nothing to separate, then intimate sessions, then live-in-a-room, then covers
 _TIERS = (
     re.compile(r"a ?cappella|acapella|vocals? only", re.I),
-    re.compile(r"acoustic|stripped|piano|unplugged|session|session", re.I),
+    re.compile(r"acoustic|stripped|piano|unplugged|session", re.I),
     re.compile(r"off the floor|warm up|living room|at home|bedroom|one take", re.I),
     re.compile(r"vevo|\blift\b|dscvr|sofar|live performance|\blive\b", re.I),
     re.compile(r"\bcover\b", re.I),
@@ -94,7 +94,7 @@ def _strip_singer(title: str, singer: str) -> str:
 
 def song_key(title: str, singer: str) -> str:
     """The song a title is a version *of* — the unit the one-version-per-song cap counts.
-    'Artist - Stay (Porch Version)' and 'Stay (Live Acoustic)' are both 'stay'."""
+    'Artist - Harbor (Porch Version)' and 'Harbor (Live Acoustic)' are both 'harbor'."""
     t = _strip_singer(title, singer)
     t = re.sub(r"\(.*?\)|\[.*?\]|\|.*$|\".*?\"", " ", t)
     t = t.split(" - ")[-1] if " - " in t else t
