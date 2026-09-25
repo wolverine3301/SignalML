@@ -12,6 +12,14 @@ What changed since session 1, all on branch **`rig-day`** (merge to `main` + pus
   download -> corpus layout + manifest, with the licence note in `license_note`.
 - `signalml lyrics` — Whisper lyrics for songs without a `lyrics.txt`.
 - `signalml ship plan --what unprocessed --prefix RAW/harvest` — raw new songs to the rig.
+- `segmentation.ph_num_mode: vowel_onset` — **decide before SOME labels full_v2.**
+  The variance model's "word" is the phones within one *note* (confirmed in their
+  binarizer + inference code); S6b grouped by dictionary word, which only matches for
+  one-syllable words. The acoustic model ignores ph_num, so switching costs the
+  acoustic run nothing. Recommendation: set it in `dataset.full_v2.yaml` before the
+  build. (overfit_v1's existing SOME labels were made with word grouping.)
+- `signalml score to-ds song.json` — a score -> `.ds` for variance + acoustic inference,
+  the way to hear the model sing something it never heard (grouping must match above).
 
 ## 1. Morning, work PC (Logan)
 
@@ -99,7 +107,20 @@ full_acoustic_v2 --recipe configs\dataset.full_v2.yaml` -> variance training aft
 acoustic run (or overfit_v1 variance first, as a quick end-to-end proof — its path was
 verified on CPU 2026-09-24: binarize + 30 steps clean).
 
-## 6. Before leaving the rig
+## 6. Hear it sing a new score
+
+```powershell
+signalml score from-midi melody.mid --lyrics lyrics.txt --out song.json  # or hand-write
+signalml score to-ds song.json                                         # -> song.ds
+cd third_party\DiffSinger
+python scripts\infer.py variance ..\..\song.ds --exp full_variance_v2 --predict dur --predict pitch
+python scripts\infer.py acoustic <variance output .ds> --exp full_acoustic_v2 --spk <singer>
+```
+
+(Check `infer.py --help` for the exact flags of the vendored version; the vocoder is
+the NC community one — dev preview only.)
+
+## 7. Before leaving the rig
 
 Ship results home (the rig is borrowed; the work PC holds the canonical DATA_ROOT):
 the new songs' `songs/<id>/` (stems, clean, lyrics, align) and the best checkpoints.
