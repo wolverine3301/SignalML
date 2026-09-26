@@ -34,6 +34,10 @@ filters:
 alignment_variant: phrase
 phrase_gate:
   enabled: true
+  # Alignment-health tests only. "Unsure" lyrics lines are mostly Whisper missing a
+  # sung line (4-7% of lines even on hand-corrected lyrics, 2026-09-26), so gating on
+  # them throws away good phrases; bad text shows up in the health numbers anyway.
+  drop_unsure_lyrics: false
 
 segmentation:
   split_gap_sec: 0.4

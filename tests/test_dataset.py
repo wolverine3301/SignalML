@@ -578,9 +578,10 @@ class TestPhraseGate:
     def test_phrase_fails_reasons(self):
         from signalml.stages.dataset import PhraseGate, phrase_fails
 
-        gate = PhraseGate(enabled=True)
+        gate = PhraseGate(enabled=True, drop_unsure_lyrics=True)
         assert [phrase_fails(u, gate) for u in self.UTTS] == [None, "floor_frac",
                                                               "unsure_lyrics"]
+        assert phrase_fails(self.UTTS[2], PhraseGate(enabled=True)) is None  # opt-in
         lenient = PhraseGate(enabled=True, max_floor_frac=None, max_floor_run=None,
                              drop_unsure_lyrics=False)
         assert [phrase_fails(u, lenient) for u in self.UTTS] == [None, None, None]
@@ -601,7 +602,8 @@ class TestPhraseGate:
         m.upsert(rec)
         m.save()
         s = build(root, recipe=recipe(name="gated", alignment_variant="phrase",
-                                      phrase_gate={"enabled": True}))
+                                      phrase_gate={"enabled": True,
+                                                   "drop_unsure_lyrics": True}))
         assert s.clips == 1 and s.gated_phrases == {"floor_frac": 1, "unsure_lyrics": 1}
         assert s.gated_sec == pytest.approx(2.1)
         card = (s.out_dir / "dataset_card.md").read_text(encoding="utf-8")

@@ -145,7 +145,10 @@ being forced onto neighbouring words.
 
 **Phrase gate** (`phrase_gate` in a recipe) removes a phrase's phones, and keeps clips
 from padding into its audio, when its alignment failed: >= 70% of phones at the 30 ms
-floor, a run of >= 8 floor phones, a phone > 5 s, or a line resolve marked unsure.
+floor, a run of >= 8 floor phones, or a phone > 5 s. Optionally (`drop_unsure_lyrics`)
+also a phrase holding a line resolve marked unsure - off by default: 4-7% of lines
+come out unsure even on hand-corrected lyrics, nearly all of them Whisper missing a
+sung line, so gating on them throws good phrases away.
 
 ### How well resolve repairs lyrics: `scripts/resolve_plant_eval.py`
 

@@ -169,7 +169,10 @@ class PhraseGate(BaseModel):
     max_floor_frac: float | None = 0.7   # share of the phrase's phones at the floor
     max_floor_run: int | None = 8        # consecutive floor phones
     max_phone_sec: float | None = 5.0    # one phone held longer than this
-    drop_unsure_lyrics: bool = True      # a line lyrics --resolve could not vouch for
+    # A line lyrics --resolve could not vouch for. Off by default: on hand-corrected
+    # lyrics 4-7% of lines come out unsure, nearly all Whisper missing a sung line
+    # (2026-09-26), so this mostly throws good phrases away.
+    drop_unsure_lyrics: bool = False
 
 
 def phrase_fails(u: dict, gate: PhraseGate) -> str | None:
