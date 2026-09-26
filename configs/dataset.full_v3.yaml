@@ -1,0 +1,64 @@
+# Tonight's big run (2026-09-26): full_v2m's settings on the phrase alignment.
+#
+# Labels come from `align --phrases --variant phrase` (Whisper-anchored phrase
+# utterances, lyrics --resolve, aligner spelling, G2P for out-of-dictionary words,
+# unlyricked singing left out of every utterance) instead of whole-song MFA, which put
+# ~45% of phones at MFA's 30 ms floor (docs/notes/chunked_alignment.md). The phrase
+# gate leaves out phrases whose alignment still failed. A/B against the old labels:
+# DATA_ROOT/runs/ab_phrase (private).
+#
+# min_align_score reads the phrase alignment's own coverage (analysis.json
+# "align.phrase"): lower than whole-song coverage by design, since audio no lyric
+# accounts for is left unaligned rather than smeared over neighbouring words.
+#
+# Private overlay: configs/dataset.full_v3.local.yaml (gitignored) - exclude_singers.
+#
+#   signalml dataset build --recipe configs/dataset.full_v3.yaml
+name: full_acoustic_v3
+trainer: acoustic
+profile: prod
+
+filters:
+  domain: sung
+  language: en
+  gender: F
+  min_align_score: 0.8
+  exclude_processing: [heavy]
+  corpora: []
+  exclude_corpora: []
+  singers: []
+  exclude_singers: []   # set in the .local.yaml overlay
+  min_singer_minutes: 0.0   # off - see dataset.full_v2m.yaml: the floor belongs to voice-bank sampling
+  ids: []
+
+alignment_variant: phrase
+phrase_gate:
+  enabled: true
+
+segmentation:
+  split_gap_sec: 0.4
+  min_clip_sec: 2.0
+  max_clip_sec: 15.0
+  pad_sec: 0.15
+  inner_sp_min_sec: 0.05
+  drop_noise_clips: true
+  # one ph_num group per sung note - what the variance model reads at inference
+  ph_num_mode: vowel_onset
+  # consonant allophones folded to base phonemes (full_v2m's A/B winner)
+  phone_merge: consonant_core
+
+test_clips_per_speaker: 2
+
+trainer_opts:
+  # Frames, not seconds. Measured on the 24 GB 4090 (2026-09-25): 50000/48 filled VRAM,
+  # spilled to system RAM and ran at 0.10 steps/s; 20000/32 uses ~21 GB and settles at
+  # ~6.4 steps/s after the first epochs (early epochs are slow while cuDNN tunes for
+  # new batch shapes - judge speed from epoch 3 on, not the first minutes).
+  max_batch_frames: 20000
+  max_batch_size: 32
+  binarization_workers: 8
+  num_ckpt_keep: 5              # rolling, for resume
+  # ~850 MB each: a checkpoint every 10k steps across a 160k run is ~13 GB, which is
+  # the price of being able to go back to the step that sounded best.
+  permanent_ckpt_start: 10000
+  permanent_ckpt_interval: 10000
