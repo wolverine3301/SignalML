@@ -144,8 +144,11 @@ left out of both neighbouring utterances when there are real dips around it, ins
 being forced onto neighbouring words.
 
 **Phrase gate** (`phrase_gate` in a recipe) removes a phrase's phones, and keeps clips
-from padding into its audio, when its alignment failed: >= 70% of phones at the 30 ms
-floor, a run of >= 8 floor phones, or a phone > 5 s. Optionally (`drop_unsure_lyrics`)
+from padding into its audio, when its alignment collapsed: >= 90% of phones at the
+30 ms floor, a run of >= 16 floor phones, or a phone > 10 s (the worst 3.5% of
+phrases on the corpus). Stricter settings cost far more than they look: 0.7 / 8 / 5 s
+removes 18% of phrases but 34% of clip hours, because a removed phrase strands
+neighbouring fragments below the minimum clip length. Optionally (`drop_unsure_lyrics`)
 also a phrase holding a line resolve marked unsure - off by default: 4-7% of lines
 come out unsure even on hand-corrected lyrics, nearly all of them Whisper missing a
 sung line, so gating on them throws good phrases away.

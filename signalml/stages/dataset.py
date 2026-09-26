@@ -159,16 +159,18 @@ class PhraseGate(BaseModel):
     """Leave badly aligned phrases out of the clips (needs a phrase alignment:
     ``align --phrases`` writes the per-phrase numbers to ``align/utterances*.json``).
 
-    Thresholds calibrated 2026-09-26 on a pilot's phrase alignment, where
-    stacking at MFA's 30 ms floor is common even in good phrases (41% have a run of 4+
-    floor phones): these defaults flag the clear failures, ~15-20% of phrases. The
-    phrase's phones are removed and clips never extend into its audio; the good
-    phrases around it still make clips. None disables a test."""
+    Stacking at MFA's 30 ms floor is common even in good phrases (41% of the pilot's
+    have a run of 4+ floor phones), so only near-total collapse counts. Measured on
+    the corpus (2026-09-26): 0.7 / 8 / 5 s removes 18% of phrases and 34% of clip
+    hours - a removed phrase also strands neighbouring fragments below min_clip_sec -
+    while these defaults remove the worst 3.5% of phrases and 13% of hours, much of
+    it single phones stretched over seconds. The phrase's phones are removed and clips
+    never extend into its audio. None disables a test."""
 
     enabled: bool = False
-    max_floor_frac: float | None = 0.7   # share of the phrase's phones at the floor
-    max_floor_run: int | None = 8        # consecutive floor phones
-    max_phone_sec: float | None = 5.0    # one phone held longer than this
+    max_floor_frac: float | None = 0.9   # share of the phrase's phones at the floor
+    max_floor_run: int | None = 16       # consecutive floor phones
+    max_phone_sec: float | None = 10.0   # one phone held longer than this
     # A line lyrics --resolve could not vouch for. Off by default: on hand-corrected
     # lyrics 4-7% of lines come out unsure, nearly all Whisper missing a sung line
     # (2026-09-26), so this mostly throws good phrases away.
