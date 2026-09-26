@@ -624,3 +624,17 @@ class TestPhraseGate:
         update_analysis(adir.parent, "align.phrase", {"align_score": 0.5})
         s = build(root, recipe=recipe(name="low", alignment_variant="phrase"))
         assert "align_score 0.5" in s.skipped[sid]
+
+
+def test_min_lyrics_agreement_filters_on_the_resolution(tmp_path, make_wav):
+    root = tmp_path / "dr"
+    sid = _ready_song(root, make_wav)
+    r = recipe(name="agree", filters={"min_align_score": 0.8, "min_lyrics_agreement": 0.6,
+                                      "exclude_processing": ["heavy"]})
+    s = build(root, recipe=r)
+    assert "lyrics agreement None" in s.skipped[sid]          # never resolved
+    update_analysis(song_dir(root, sid), "lyrics_resolve", {"agreement": 0.42})
+    s = build(root, recipe=r, force=True)
+    assert "lyrics agreement 0.42" in s.skipped[sid]
+    update_analysis(song_dir(root, sid), "lyrics_resolve", {"agreement": 0.9})
+    assert build(root, recipe=r, force=True).clips > 0

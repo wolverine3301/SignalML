@@ -22,7 +22,12 @@ filters:
   domain: sung
   language: en
   gender: F
-  min_align_score: 0.8
+  # phrase coverage (see header): 0.8 would drop about half the songs; 0.5 drops
+  # only those with most of their singing unaligned
+  min_align_score: 0.5
+  # text vs singing agreement from lyrics --resolve: under 0.6 (~5% of songs) the
+  # pasted lyrics and the performance part ways broadly
+  min_lyrics_agreement: 0.6
   exclude_processing: [heavy]
   corpora: []
   exclude_corpora: []

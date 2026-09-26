@@ -54,6 +54,12 @@ class DatasetFilters(BaseModel):
     corpora: list[str] = []
     exclude_corpora: list[str] = []
     min_align_score: float = 0.8
+    # lyrics --resolve's agreement (share of the lyric words Whisper heard). Low means
+    # the text and the singing part ways broadly - a cover that skipped a rap verse,
+    # rewrote lines - where resolve's line-by-line repairs are least reliable. Phrase
+    # coverage does not see it (2026-09-26: no song under 0.6 agreement was under 0.6
+    # coverage). 0 = off; a song without a resolution fails any threshold above 0.
+    min_lyrics_agreement: float = 0.0
     exclude_processing: list[str] = ["heavy"]
     singers: list[str] = []  # empty = all singers
     # Tags that are not one voice: a producer credited as the singer pools several
@@ -418,6 +424,15 @@ def _variant_score(data_root: Path, song_id: str, variant: str) -> float | None:
         return None
 
 
+def _lyrics_agreement(data_root: Path, song_id: str) -> float | None:
+    try:
+        data = json.loads((song_dir(data_root, song_id) / "analysis.json")
+                          .read_text(encoding="utf-8"))
+        return float(data["lyrics_resolve"]["agreement"])
+    except (OSError, KeyError, TypeError, ValueError):
+        return None
+
+
 def _select(manifest: Manifest, recipe: DatasetRecipe, summary: BuildSummary,
             data_root: Path) -> list[ManifestRecord]:
     f = recipe.filters
@@ -458,6 +473,10 @@ def _select(manifest: Manifest, recipe: DatasetRecipe, summary: BuildSummary,
                         if recipe.alignment_variant else rec.quality.align_score)) is None \
                 or score < f.min_align_score:
             reason = f"align_score {score} < {f.min_align_score}"
+        elif f.min_lyrics_agreement > 0 and (
+                (agree := _lyrics_agreement(data_root, rec.id)) is None
+                or agree < f.min_lyrics_agreement):
+            reason = f"lyrics agreement {agree} < {f.min_lyrics_agreement}"
         else:
             profile = _profile_of(song_dir(data_root, rec.id))
             if profile != recipe.profile:
