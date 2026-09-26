@@ -552,3 +552,56 @@ def test_manifest_module_still_imports():
     from signalml.stages import dataset  # noqa: F401
 
     assert Manifest is not None
+
+
+class TestPhraseGate:
+    # three phrases with 0.1 s joins (one clip without a gate); the middle one is bad
+    TIGHT = [{"ph": "a", "start": 0.5 + 0.2 * i, "end": 0.7 + 0.2 * i, "word": f"w{i}",
+              "stress": None} for i in range(15)]  # 0.5 .. 3.5 s, no gaps
+    UTTS = [
+        {"start": 0.4, "end": 1.5, "n_phones": 5, "floor_frac": 0.0, "max_floor_run": 0,
+         "max_phone_sec": 0.2, "unsure_lyrics": False},
+        {"start": 1.5, "end": 2.5, "n_phones": 5, "floor_frac": 0.9, "max_floor_run": 9,
+         "max_phone_sec": 0.2, "unsure_lyrics": False},
+        {"start": 2.5, "end": 3.6, "n_phones": 5, "floor_frac": 0.0, "max_floor_run": 0,
+         "max_phone_sec": 0.2, "unsure_lyrics": True},
+    ]
+
+    def test_blocked_interval_splits_and_bounds_padding(self):
+        kept = [p for p in self.TIGHT if not 1.5 <= (p["start"] + p["end"]) / 2 < 2.5]
+        clips, _ = segment_phones(kept, SEG, audio_len_sec=4.0, blocked=[(1.5, 2.5)])
+        assert len(clips) == 2
+        assert clips[0].end <= 1.5 and clips[1].start >= 2.5
+        (one,), _ = segment_phones(self.TIGHT, SEG, audio_len_sec=4.0)  # no gate
+        assert one.start < 1.5 < one.end
+
+    def test_phrase_fails_reasons(self):
+        from signalml.stages.dataset import PhraseGate, phrase_fails
+
+        gate = PhraseGate(enabled=True)
+        assert [phrase_fails(u, gate) for u in self.UTTS] == [None, "floor_frac",
+                                                              "unsure_lyrics"]
+        lenient = PhraseGate(enabled=True, max_floor_frac=None, max_floor_run=None,
+                             drop_unsure_lyrics=False)
+        assert [phrase_fails(u, lenient) for u in self.UTTS] == [None, None, None]
+
+    def test_build_reads_variant_and_gates(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        sid = _ready_song(root, make_wav, phones=self.TIGHT)
+        adir = song_dir(root, sid) / "align"
+        (adir / "phones.phrase.json").write_text(
+            (adir / "phones.json").read_text(encoding="utf-8"), encoding="utf-8")
+        (adir / "utterances.phrase.json").write_text(json.dumps(self.UTTS),
+                                                     encoding="utf-8")
+        s = build(root, recipe=recipe(name="gated", alignment_variant="phrase",
+                                      phrase_gate={"enabled": True}))
+        assert s.clips == 1 and s.gated_phrases == {"floor_frac": 1, "unsure_lyrics": 1}
+        assert s.gated_sec == pytest.approx(2.1)
+        card = (s.out_dir / "dataset_card.md").read_text(encoding="utf-8")
+        assert "phones.phrase.json" in card and "phrase gate: 2 phrase(s)" in card
+
+    def test_missing_variant_skips_song(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        sid = _ready_song(root, make_wav)
+        s = build(root, recipe=recipe(name="nov", alignment_variant="phrase"))
+        assert "phones.phrase.json" in s.skipped[sid]

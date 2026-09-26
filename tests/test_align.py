@@ -157,6 +157,48 @@ class TestAlignStage:
         assert Manifest.for_data_root(data_root).get("sng_0001").status.aligned is False
 
 
+class TestPhraseVariant:
+    def _asr(self, data_root):
+        ldir = song_dir(data_root, "sng_0001") / "lyrics"
+        ldir.mkdir(parents=True, exist_ok=True)
+        (ldir / "asr.json").write_text(json.dumps({"segments": [
+            {"start": 0.1, "end": 0.6, "text": "shine",
+             "words": [{"w": "shine", "start": 0.1, "end": 0.6}]}]}), encoding="utf-8")
+
+    def test_variant_writes_beside_and_leaves_manifest_alone(self, data_root):
+        align(data_root, runner=fake_mfa_runner)  # canonical whole-song alignment
+        adir = song_dir(data_root, "sng_0001") / "align"
+        before = (adir / "phones.json").read_text(encoding="utf-8")
+        self._asr(data_root)
+        seen = {}
+
+        def runner(cmd):
+            corpus = Path(cmd[cmd.index("align") + 2])
+            seen["files"] = sorted(p.name for p in (corpus / "sng_0001").iterdir())
+            fake_mfa_runner(cmd)
+
+        s = align(data_root, runner=runner, phrases=True, variant="phrase")
+        assert s.aligned == ["sng_0001"] and not s.failed
+        assert seen["files"] == ["sng_0001.TextGrid", "sng_0001.wav"]  # no .lab
+        assert (adir / "phones.json").read_text(encoding="utf-8") == before
+        assert (adir / "phones.phrase.json").exists()
+        utts = json.loads((adir / "utterances.phrase.json").read_text(encoding="utf-8"))
+        assert utts and {"floor_frac", "max_floor_run", "unsure_lyrics"} <= set(utts[0])
+        analysis = json.loads((adir.parent / "analysis.json").read_text(encoding="utf-8"))
+        assert analysis["align.phrase"]["mode"] == "phrases"
+        assert analysis["align"]["n_phones"] == 3  # canonical section untouched
+        # idempotent per variant file, not per manifest status
+        assert align(data_root, runner=runner, phrases=True, variant="phrase").aligned == []
+
+    def test_phrases_without_asr_fail_loudly(self, data_root):
+        s = align(data_root, runner=fake_mfa_runner, phrases=True, variant="phrase")
+        assert "asr.json" in s.failed["sng_0001"]
+
+    def test_variant_name_is_checked(self, data_root):
+        with pytest.raises(ValueError, match="variant"):
+            align(data_root, runner=fake_mfa_runner, variant="../x")
+
+
 def test_load_align_config_defaults_and_file(tmp_path):
     assert load_align_config(tmp_path / "missing.yaml") == AlignConfig()
     f = tmp_path / "align.yaml"

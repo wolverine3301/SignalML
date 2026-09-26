@@ -28,6 +28,20 @@ PROMPT = ("Song lyrics, sung. Transcribe every sung sound including ad-libs and 
           "ooh, oh, ah, yeah, mm, hmm, la la la, na na, whoa.")
 
 
+def _add_pip_cuda_dlls() -> None:
+    """Windows: cuBLAS/cuDNN installed as nvidia-* pip wheels keep their DLLs in
+    site-packages/nvidia/*/bin, which ctranslate2 does not search on its own."""
+    if sys.platform != "win32":
+        return
+    import os
+    import site
+
+    for sp in site.getsitepackages():
+        for bin_dir in Path(sp).glob("nvidia/*/bin"):
+            os.add_dll_directory(str(bin_dir))
+            os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
@@ -39,6 +53,7 @@ def main() -> int:
     ap.add_argument("--cpu-threads", type=int, default=0)
     args = ap.parse_args()
 
+    _add_pip_cuda_dlls()
     from faster_whisper import WhisperModel
 
     device = args.device
@@ -71,7 +86,9 @@ def main() -> int:
                               "compression_ratio": round(s.compression_ratio, 3),
                               "no_speech_prob": round(s.no_speech_prob, 4),
                               "words": [{"w": w.word.strip(), "start": round(w.start, 3),
-                                         "end": round(w.end, 3)} for w in (s.words or [])]}
+                                         "end": round(w.end, 3),
+                                         "p": round(w.probability, 3)}
+                                        for w in (s.words or [])]}
                              for s in segs],
             }
         except Exception as exc:  # noqa: BLE001 - reported per song, batch continues

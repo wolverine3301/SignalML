@@ -155,12 +155,47 @@ class TrainerOpts(BaseModel):
         return v
 
 
+class PhraseGate(BaseModel):
+    """Leave badly aligned phrases out of the clips (needs a phrase alignment:
+    ``align --phrases`` writes the per-phrase numbers to ``align/utterances*.json``).
+
+    Thresholds calibrated 2026-09-26 on a pilot's phrase alignment, where
+    stacking at MFA's 30 ms floor is common even in good phrases (41% have a run of 4+
+    floor phones): these defaults flag the clear failures, ~15-20% of phrases. The
+    phrase's phones are removed and clips never extend into its audio; the good
+    phrases around it still make clips. None disables a test."""
+
+    enabled: bool = False
+    max_floor_frac: float | None = 0.7   # share of the phrase's phones at the floor
+    max_floor_run: int | None = 8        # consecutive floor phones
+    max_phone_sec: float | None = 5.0    # one phone held longer than this
+    drop_unsure_lyrics: bool = True      # a line lyrics --resolve could not vouch for
+
+
+def phrase_fails(u: dict, gate: PhraseGate) -> str | None:
+    if u.get("n_phones", 0) == 0:
+        return None  # nothing aligned there: no phones to drop
+    if gate.drop_unsure_lyrics and u.get("unsure_lyrics"):
+        return "unsure_lyrics"
+    if gate.max_floor_frac is not None and (u.get("floor_frac") or 0) >= gate.max_floor_frac:
+        return "floor_frac"
+    if gate.max_floor_run is not None and u.get("max_floor_run", 0) >= gate.max_floor_run:
+        return "floor_run"
+    if gate.max_phone_sec is not None and (u.get("max_phone_sec") or 0) > gate.max_phone_sec:
+        return "long_phone"
+    return None
+
+
 class DatasetRecipe(BaseModel):
     name: str
     trainer: Literal["acoustic", "variance"] = "acoustic"
     profile: str = "prod"  # clips must come from clean/ at this profile (Q11)
     filters: DatasetFilters = Field(default_factory=DatasetFilters)
     segmentation: SegmentationCfg = Field(default_factory=SegmentationCfg)
+    # Read align/phones.<variant>.json (an `align --variant` output) instead of
+    # align/phones.json; songs without that file are skipped.
+    alignment_variant: str | None = None
+    phrase_gate: PhraseGate = Field(default_factory=PhraseGate)
     test_clips_per_speaker: int = 2
     trainer_opts: TrainerOpts = Field(default_factory=TrainerOpts)
 
@@ -201,6 +236,8 @@ class BuildSummary:
     songs_used: list[str] = field(default_factory=list)
     skipped: dict[str, str] = field(default_factory=dict)  # id -> reason
     dropped_clips: int = 0  # noise/too-short/unsplittable
+    gated_phrases: dict[str, int] = field(default_factory=dict)  # reason -> count
+    gated_sec: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -230,7 +267,8 @@ def vowel_onset_groups(tokens: tuple[str, ...] | list[str],
 
 
 def segment_phones(
-    phones: list[dict], cfg: SegmentationCfg, *, audio_len_sec: float
+    phones: list[dict], cfg: SegmentationCfg, *, audio_len_sec: float,
+    blocked: list[tuple[float, float]] | None = None,
 ) -> tuple[list[Clip], int]:
     """Cut aligned phones into training clips at silence gaps.
 
@@ -238,7 +276,20 @@ def segment_phones(
     the best inner gap seen so far (>= inner_sp_min_sec), or force-splits at the
     current phone boundary as a last resort. Returns (clips, dropped_count) where
     dropped covers too-short and (optionally) noise-containing clips.
+
+    ``blocked``: audio intervals no clip may reach into (gated phrases, whose phones
+    the caller has already removed) - a clip always ends before one, and its padding
+    stops at the edge, so that audio is never labelled as silence.
     """
+    blocked = sorted(blocked or [])
+
+    def crosses_block(t0: float, t1: float) -> bool:
+        return any(bs < t1 and be > t0 for bs, be in blocked)
+
+    def pad_bounds(t0: float, t1: float) -> tuple[float, float]:
+        lo = max([be for _, be in blocked if be <= t0 + 1e-9], default=0.0)
+        hi = min([bs for bs, _ in blocked if bs >= t1 - 1e-9], default=audio_len_sec)
+        return lo, hi
     from ..score.phoneset import PHONE_MERGES
 
     merge = PHONE_MERGES[cfg.phone_merge]
@@ -257,8 +308,9 @@ def segment_phones(
         if span < cfg.min_clip_sec or (cfg.drop_noise_clips and has_noise):
             dropped += 1
             return
-        start = max(0.0, g[0]["start"] - cfg.pad_sec)
-        end = min(audio_len_sec, g[-1]["end"] + cfg.pad_sec)
+        lo, hi = pad_bounds(g[0]["start"], g[-1]["end"])
+        start = max(0.0, lo, g[0]["start"] - cfg.pad_sec)
+        end = min(audio_len_sec, hi, g[-1]["end"] + cfg.pad_sec)
         tokens: list[str] = []
         durations: list[float] = []
         # ph_num counts phones per word. SP is its own word, and a word ends when the
@@ -311,7 +363,8 @@ def segment_phones(
             best_gap_idx, best_gap = None, 0.0
             continue
         gap = p["start"] - group[-1]["end"]
-        if gap >= cfg.split_gap_sec:
+        if gap >= cfg.split_gap_sec or (blocked and crosses_block(group[-1]["end"],
+                                                                  p["start"])):
             flush(group)
             group = [p]
             best_gap_idx, best_gap = None, 0.0
@@ -408,14 +461,34 @@ def _cut_all(
     """
     cut: dict[str, tuple[list[Clip], int]] = {}
     kept: list[ManifestRecord] = []
+    suffix = f".{recipe.alignment_variant}" if recipe.alignment_variant else ""
+    gate = recipe.phrase_gate
     for rec in selected:
         sdir = song_dir(data_root, rec.id)
-        payload = json.loads(
-            (sdir / "align" / "phones.json").read_text(encoding="utf-8"))
+        phones_path = sdir / "align" / f"phones{suffix}.json"
+        if not phones_path.exists():
+            summary.skipped[rec.id] = f"no {phones_path.name} (alignment variant missing)"
+            continue
+        phones = json.loads(phones_path.read_text(encoding="utf-8"))["phones"]
+        blocked: list[tuple[float, float]] = []
+        if gate.enabled:
+            utts_path = sdir / "align" / f"utterances{suffix}.json"
+            if not utts_path.exists():
+                summary.skipped[rec.id] = (f"phrase_gate on but no {utts_path.name} "
+                                           f"(align --phrases writes it)")
+                continue
+            for u in json.loads(utts_path.read_text(encoding="utf-8")):
+                why = phrase_fails(u, gate)
+                if why:
+                    blocked.append((u["start"], u["end"]))
+                    summary.gated_phrases[why] = summary.gated_phrases.get(why, 0) + 1
+                    summary.gated_sec += u["end"] - u["start"]
+            phones = [p for p in phones if not any(
+                bs <= (p["start"] + p["end"]) / 2 < be for bs, be in blocked)]
         info = sf.info(str(sdir / "clean" / "vocals.wav"))
         clips, dropped = segment_phones(
-            payload["phones"], recipe.segmentation,
-            audio_len_sec=info.frames / info.samplerate)
+            phones, recipe.segmentation,
+            audio_len_sec=info.frames / info.samplerate, blocked=blocked)
         if not clips:
             summary.skipped[rec.id] = "no usable clips after segmentation"
             continue
@@ -666,6 +739,11 @@ def _write_card(
         f"\n- trainer: {recipe.trainer}   profile: **{recipe.profile}**",
         f"- songs: {len(summary.songs_used)}   clips: {summary.clips}   "
         f"hours: {summary.seconds / 3600:.2f}   dropped clips: {summary.dropped_clips}",
+        f"- alignment: phones{'.' + recipe.alignment_variant if recipe.alignment_variant else ''}"
+        f".json   phrase gate: "
+        + (f"{sum(summary.gated_phrases.values())} phrase(s), "
+           f"{summary.gated_sec / 60:.1f} min left out {dict(summary.gated_phrases)}"
+           if recipe.phrase_gate.enabled else "off"),
         f"- align_score range: {min(align_scores):.3f}–{max(align_scores):.3f}"
         if align_scores else "- align_score range: n/a",
         "\n## Recipe\n\n```yaml",

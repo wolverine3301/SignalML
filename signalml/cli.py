@@ -109,7 +109,8 @@ def _cmd_harvest_fetch(args: argparse.Namespace) -> int:
 
     urls = list(args.url)
     if args.urls:
-        urls += Path(args.urls).read_text(encoding="utf-8").splitlines()
+        # utf-8-sig: Notepad's "UTF-8 with BOM" would glue U+FEFF onto the first URL
+        urls += Path(args.urls).read_text(encoding="utf-8-sig").splitlines()
     if not urls:
         print("harvest fetch: no URLs (pass them, or --urls FILE)", file=sys.stderr)
         return 1
@@ -395,6 +396,9 @@ def _cmd_align(args: argparse.Namespace) -> int:
         cfg=load_align_config(args.config),
         force=args.force,
         limit=args.limit,
+        phrases=args.phrases,
+        variant=args.variant,
+        ids=args.ids or None,
     )
     print(f"align: {len(summary.aligned)} aligned, "
           f"{len(summary.skipped)} skipped, {len(summary.failed)} failed")
@@ -589,6 +593,9 @@ def _cmd_dataset_build(args: argparse.Namespace) -> int:
           f"from {len(summary.songs_used)} song(s) -> {summary.out_dir}")
     if summary.dropped_clips:
         print(f"  {summary.dropped_clips} clip(s) dropped (noise/too short)")
+    if summary.gated_phrases:
+        print(f"  phrase gate: {sum(summary.gated_phrases.values())} phrase(s), "
+              f"{summary.gated_sec / 60:.1f} min left out {summary.gated_phrases}")
     for rid, reason in sorted(summary.skipped.items()):
         print(f"  SKIPPED {rid}: {reason}", file=sys.stderr)
     return 0 if summary.clips else 1
@@ -674,6 +681,24 @@ def _cmd_lyrics(args: argparse.Namespace) -> int:
         for rid, why in sorted(s.failed.items()):
             print(f"  FAILED {rid}: {why}", file=sys.stderr)
         return 1 if s.failed and not s.checked else 0
+
+    if args.resolve:
+        from .stages.lyrics_resolve import run_resolve
+
+        rs = run_resolve(resolve_data_root(args.data_root), ids=args.ids or None,
+                         force=args.force)
+        totals: dict[str, int] = {}
+        for res in rs.resolved.values():
+            for k, v in res.counts().items():
+                totals[k] = totals.get(k, 0) + v
+        print(f"lyrics --resolve: {len(rs.resolved)} resolved, {len(rs.failed)} failed, "
+              f"{len(rs.skipped)} skipped (no asr.json, machine lyrics, or done)")
+        for k in sorted(totals):
+            if k != "line_kept":
+                print(f"  {k}: {totals[k]}")
+        for rid, why in sorted(rs.failed.items()):
+            print(f"  FAILED {rid}: {why}", file=sys.stderr)
+        return 1 if rs.failed and not rs.resolved else 0
 
     summary = run(
         resolve_data_root(args.data_root),
@@ -1238,6 +1263,13 @@ def main(argv: list[str] | None = None) -> int:
     align_p.add_argument("--config", default=None, help="align.yaml override path")
     align_p.add_argument("--force", action="store_true", help="re-align finished songs")
     align_p.add_argument("--limit", type=int, default=None, help="max songs this run")
+    align_p.add_argument("--phrases", action="store_true",
+                         help="align phrase by phrase, anchored on Whisper word times "
+                              "(needs lyrics/asr.json); writes align/utterances.json")
+    align_p.add_argument("--variant", default=None,
+                         help="write align/phones.<variant>.json beside the canonical "
+                              "alignment instead of replacing it (manifest untouched)")
+    align_p.add_argument("--ids", nargs="*", default=None, help="only these song ids")
     align_p.set_defaults(func=_cmd_align)
 
     # eval (P5.4 aligner comparison — docs/notes/aligner_eval.md)
@@ -1427,6 +1459,10 @@ def main(argv: list[str] | None = None) -> int:
     ly_p.add_argument("--check", action="store_true",
                       help="compare HUMAN lyrics with what is sung and write a review file "
                            "of departures (repeats, ad-libs, skipped lines); lyrics untouched")
+    ly_p.add_argument("--resolve", action="store_true",
+                      help="decide per (parenthesised) group and per unheard line what "
+                           "was sung, from lyrics/asr.json; writes lyrics/resolved.txt "
+                           "for align (the human file is untouched)")
     ly_p.add_argument("--prefix", default=None,
                       help="--check: only songs under this DATA_ROOT path, e.g. RAW/<batch>")
     ly_p.add_argument("--report", default=None,

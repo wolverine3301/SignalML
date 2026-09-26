@@ -38,6 +38,11 @@ SMOOTH_SEC = 0.08
 CONTEXT_SEC = 3.0
 # Margin kept before the first and after the last anchored word of the song.
 EDGE_MARGIN_SEC = 1.0
+# Leave the audio between two consecutive lines out of both utterances when at least
+# this many heard words there belong to no line, or when the gap is this long.
+MIN_EXTRA_WORDS = 3
+MAX_GAP_SEC = 4.0
+HOLD_SEC = 2.0  # how far past a line's last heard word its final note may still ring
 
 
 @dataclass(frozen=True)
@@ -76,12 +81,14 @@ def timed_words(segments: list[dict]) -> list[tuple[str, float, float]]:
     return out
 
 
-def line_spans(lines: list[str], segments: list[dict]) -> list[tuple[float, float] | None]:
-    """Rough (start, end) per lyric line from its confidently matched words, else None.
+@dataclass(frozen=True)
+class LineEvidence:
+    spans: list[tuple[float, float] | None]   # confident span per line, else None
+    claims: list[tuple[float, float] | None]  # span of every heard word the line took
+    extra: list[float]                        # start times of heard words no line took
 
-    A match counts only when a neighbouring word matched too: a lone "you" or "the"
-    lines up with the wrong occurrence often enough to drag a line across the song.
-    """
+
+def line_evidence(lines: list[str], segments: list[dict]) -> LineEvidence:
     ref: list[str] = []
     line_of: list[int] = []
     for li, line in enumerate(lines):
@@ -92,20 +99,38 @@ def line_spans(lines: list[str], segments: list[dict]) -> list[tuple[float, floa
     ops = align_words(ref, [w for w, _, _ in heard])
     match = {i: j for op, i, j in ops if op == "="}
     spans: list[list[float] | None] = [None] * len(lines)
+    claims: list[list[float] | None] = [None] * len(lines)
+
     def paired(i: int, j: int, d: int) -> bool:  # neighbour matched too, same line
         k = i + d
         return 0 <= k < len(ref) and line_of[k] == line_of[i] and match.get(k) == j + d
 
-    for i, j in match.items():
-        if not (paired(i, j, -1) or paired(i, j, 1)):
-            continue
-        li, (_, s, e) = line_of[i], heard[j]
-        span = spans[li]
-        if span is None:
-            spans[li] = [s, e]
+    def widen(store: list, li: int, s: float, e: float) -> None:
+        if store[li] is None:
+            store[li] = [s, e]
         else:
-            span[0], span[1] = min(span[0], s), max(span[1], e)
-    return [tuple(s) if s else None for s in spans]
+            store[li][0], store[li][1] = min(store[li][0], s), max(store[li][1], e)
+
+    extra: list[float] = []
+    for op, i, j in ops:
+        if op == "ins":
+            extra.append(heard[j][1])
+        elif op in ("=", "sub"):
+            widen(claims, line_of[i], heard[j][1], heard[j][2])
+    for i, j in match.items():
+        if paired(i, j, -1) or paired(i, j, 1):
+            widen(spans, line_of[i], heard[j][1], heard[j][2])
+    return LineEvidence([tuple(s) if s else None for s in spans],
+                        [tuple(c) if c else None for c in claims], extra)
+
+
+def line_spans(lines: list[str], segments: list[dict]) -> list[tuple[float, float] | None]:
+    """Rough (start, end) per lyric line from its confidently matched words, else None.
+
+    A match counts only when a neighbouring word matched too: a lone "you" or "the"
+    lines up with the wrong occurrence often enough to drag a line across the song.
+    """
+    return line_evidence(lines, segments).spans
 
 
 def find_dip(level_db: np.ndarray, lo: float, hi: float,
@@ -124,30 +149,64 @@ def find_dip(level_db: np.ndarray, lo: float, hi: float,
     return (a + i + k / 2) * hop_sec
 
 
+def _excised_gap(ev: LineEvidence, a: int, b: int, level_db: np.ndarray,
+                 hop_sec: float) -> tuple[float, float] | None:
+    """(end of line a's utterance, start of line b's) when the audio between should
+    belong to neither, else None. Both edges must be real dips near their line - a
+    held last note can run past Whisper's word end, so the search reaches
+    ``HOLD_SEC`` beyond it - and without two dips nothing is cut out: chopping a
+    sustained vowel is worse than an utterance that is too wide."""
+    a_end = max(ev.spans[a][1], (ev.claims[a] or ev.spans[a])[1])
+    b_start = min(ev.spans[b][0], (ev.claims[b] or ev.spans[b])[0])
+    n_extra = sum(1 for t in ev.extra if a_end < t < b_start)
+    if b_start - a_end < MAX_GAP_SEC and n_extra < MIN_EXTRA_WORDS:
+        return None
+    mid = (a_end + b_start) / 2
+    t1 = find_dip(level_db, a_end - EDGE_TOL_SEC, min(a_end + HOLD_SEC, mid), hop_sec)
+    t2 = find_dip(level_db, max(b_start - HOLD_SEC, mid), b_start + EDGE_TOL_SEC, hop_sec)
+    if t1 is None or t2 is None or t2 <= t1:
+        return None
+    return t1, t2
+
+
 def plan_utterances(
     lyrics_text: str,
     segments: list[dict],
     level_db: np.ndarray,
     duration: float,
     hop_sec: float = HOP_SEC,
+    excise_gaps: bool = True,
 ) -> list[Utterance]:
-    """Cut the song into utterances at dips between consecutive anchored lyric lines."""
+    """Cut the song into utterances at dips between consecutive anchored lyric lines.
+
+    With ``excise_gaps``, the stretch between two lines is left out of both utterances
+    when something was sung there that no line accounts for (an ad-lib, a repeat the
+    text lacks, a line the resolve step dropped) or when it is long: no text covers
+    that audio, and inside an utterance MFA would force neighbouring words over it."""
     lines = [ln.strip() for ln in lyrics_text.splitlines() if norm_words(ln)]
     if not lines:
         return []
-    spans = line_spans(lines, segments)
+    ev = line_evidence(lines, segments)
+    spans = ev.spans
     anchored = [i for i, s in enumerate(spans) if s]
     if not anchored:
         return [Utterance(0.0, round(duration, 3), " ".join(lines), tuple(range(len(lines))))]
 
-    cuts: list[tuple[int, float]] = []  # (first line after the cut, time)
+    # (first line after the cut, end of the utterance before, start of the one after);
+    # the two times differ when the audio between is left out of both
+    cuts: list[tuple[int, float, float]] = []
     for a, b in zip(anchored, anchored[1:]):
         if b != a + 1:  # unanchored lines between: keep them inside one utterance
             continue
+        if excise_gaps:
+            gap = _excised_gap(ev, a, b, level_db, hop_sec)
+            if gap is not None and (not cuts or gap[0] > cuts[-1][2]):
+                cuts.append((b, *gap))
+                continue
         lo, hi = spans[a][1] - EDGE_TOL_SEC, spans[b][0] + EDGE_TOL_SEC
         t = find_dip(level_db, lo, hi, hop_sec) if hi > lo else None
-        if t is not None and (not cuts or t > cuts[-1][1]):
-            cuts.append((b, t))
+        if t is not None and (not cuts or t > cuts[-1][2]):
+            cuts.append((b, t, t))
 
     # song edges: a margin around the first / last anchored line, unless unanchored
     # lyric lines lie beyond it - then the whole edge, so they have audio to land in
@@ -158,13 +217,45 @@ def plan_utterances(
 
     out: list[Utterance] = []
     line0, t0 = 0, start
-    for b, t in cuts:
-        out.append(Utterance(round(t0, 3), round(t, 3), " ".join(lines[line0:b]),
+    for b, t_end, t_next in cuts:
+        out.append(Utterance(round(t0, 3), round(t_end, 3), " ".join(lines[line0:b]),
                              tuple(range(line0, b))))
-        line0, t0 = b, t
+        line0, t0 = b, t_next
     out.append(Utterance(round(t0, 3), round(end, 3), " ".join(lines[line0:]),
                          tuple(range(line0, len(lines)))))
     return [u for u in out if u.end > u.start]
+
+
+FLOOR_SEC = 0.0305  # MFA's shortest phone: 3 frames x 10 ms
+
+
+def utterance_health(utts: list[Utterance], phones: list[dict],
+                     unsure_lines: set[int] | frozenset[int] = frozenset()) -> list[dict]:
+    """Per-utterance alignment numbers - the ones that expose MFA losing the thread
+    (docs/notes/chunked_alignment.md), which song-level ``align_score`` cannot see.
+
+    A phone belongs to the utterance holding its midpoint. ``unsure_lyrics`` marks an
+    utterance containing a line the resolve step could not vouch for."""
+    out = []
+    for u in utts:
+        ds = [p["end"] - p["start"] for p in phones
+              if u.start <= (p["start"] + p["end"]) / 2 < u.end]
+        noise = sum(1 for p in phones
+                    if u.start <= (p["start"] + p["end"]) / 2 < u.end and p.get("noise"))
+        run = best = 0
+        for d in ds:
+            run = run + 1 if d <= FLOOR_SEC else 0
+            best = max(best, run)
+        out.append({
+            "start": u.start, "end": u.end, "text": u.text, "lines": list(u.lines),
+            "n_phones": len(ds),
+            "floor_frac": round(sum(d <= FLOOR_SEC for d in ds) / len(ds), 3) if ds else None,
+            "max_floor_run": best,
+            "max_phone_sec": round(max(ds), 3) if ds else None,
+            "n_noise": noise,
+            "unsure_lyrics": any(li in unsure_lines for li in u.lines),
+        })
+    return out
 
 
 def utterances_textgrid(utts: list[Utterance], duration: float, speaker: str) -> str:

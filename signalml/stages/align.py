@@ -17,6 +17,7 @@ the energy detector calls speech; low values flag songs to exclude from training
 from __future__ import annotations
 
 import datetime as _dt
+import re
 import shutil
 import subprocess
 import tempfile
@@ -31,7 +32,16 @@ from pydantic import BaseModel
 from ..config import CONFIGS_DIR
 from ..manifest import Manifest, ManifestRecord
 from ..score.phoneset import NOISE_MARKS, SILENCE_MARKS, get_phone_set
+from .align_chunks import (
+    Utterance,
+    frame_level_db,
+    plan_utterances,
+    utterance_health,
+    utterances_textgrid,
+)
 from .common import song_dir, update_analysis
+from .lyrics import ASR_NAME
+from .lyrics_resolve import load_resolution, plain_lyrics
 
 Runner = Callable[[list[str]], object]
 
@@ -81,7 +91,8 @@ def textgrid_to_phones(
 
     phone_set = get_phone_set(phone_set_name)
     tg = praatio_tg.openTextgrid(str(tg_path), includeEmptyIntervals=False)
-    tier_names = {name.lower(): name for name in tg.tierNames}
+    # MFA names tiers "words"/"phones", or "<speaker> - words" for some inputs
+    tier_names = {name.lower().rsplit(" - ", 1)[-1]: name for name in tg.tierNames}
     if "phones" not in tier_names:
         raise ValueError(f"{tg_path}: no 'phones' tier (tiers: {list(tg.tierNames)})")
 
@@ -165,6 +176,39 @@ def _find_textgrid(out_dir: Path, song_id: str) -> Path | None:
     return None
 
 
+def _variant_suffix(variant: str | None) -> str:
+    if variant is None:
+        return ""
+    if not re.fullmatch(r"[a-z0-9_]+", variant):
+        raise ValueError(f"alignment variant {variant!r}: use [a-z0-9_] only")
+    return f".{variant}"
+
+
+def _stage_phrases(sdir: Path, rec: ManifestRecord, text: str, wav: Path,
+                   spk: Path) -> list[Utterance]:
+    """Plan phrase utterances and write MFA's TextGrid transcript beside the wav."""
+    import soundfile as sf
+
+    asr = sdir / "lyrics" / ASR_NAME
+    if not asr.exists():
+        raise FileNotFoundError(
+            f"phrase alignment needs Whisper word times at {asr} "
+            f"(signalml lyrics --check writes it)")
+    payload = loads(asr.read_text(encoding="utf-8"))
+    if "error" in payload:
+        raise RuntimeError(f"asr.json holds an error: {payload['error']}")
+    y, sr = sf.read(str(wav), dtype="float32", always_2d=True)
+    y = y.mean(axis=1)
+    duration = len(y) / sr
+    utts = plan_utterances(text, payload.get("segments", []), frame_level_db(y, sr),
+                           duration)
+    if not utts:
+        raise RuntimeError("no lyric lines to align")
+    (spk / f"{rec.id}.TextGrid").write_text(
+        utterances_textgrid(utts, duration, rec.id), encoding="utf-8")
+    return utts
+
+
 def align(
     data_root: str | Path,
     *,
@@ -172,16 +216,39 @@ def align(
     force: bool = False,
     limit: int | None = None,
     runner: Runner | None = None,
+    phrases: bool = False,
+    variant: str | None = None,
+    ids: list[str] | None = None,
 ) -> AlignSummary:
+    """Align cleaned songs with MFA.
+
+    ``phrases``: cut each song into phrase utterances anchored on Whisper word times
+    (``align_chunks``) instead of one whole-song utterance; also writes
+    ``align/utterances.json`` with per-phrase health for the dataset's phrase gate.
+    Either mode reads ``lyrics/resolved.txt`` when ``lyrics --resolve`` made one;
+    phrase mode otherwise strips brackets (MFA turns ``(...)`` into spn).
+
+    ``variant``: write ``phones.<variant>.json`` (and ``vocals.<variant>.TextGrid``,
+    ``utterances.<variant>.json``) beside the canonical files instead of replacing
+    them, for side-by-side experiments; the manifest's status and align_score are left
+    alone, and already-aligned songs are eligible.
+    """
     data_root = Path(data_root)
     cfg = cfg or load_align_config()
     runner = runner or _default_runner
     manifest = Manifest.for_data_root(data_root)
     summary = AlignSummary()
+    suffix = _variant_suffix(variant)
 
     work: list[ManifestRecord] = []
     for rec in manifest.records:
-        ready = rec.status.cleaned and (force or not rec.status.aligned)
+        if ids and rec.id not in ids:
+            continue
+        if variant is None:
+            ready = rec.status.cleaned and (force or not rec.status.aligned)
+        else:
+            done = (song_dir(data_root, rec.id) / "align" / f"phones{suffix}.json").exists()
+            ready = rec.status.cleaned and (force or not done)
         if not ready or rec.meta.language != cfg.language:
             summary.skipped.append(rec.id)
         elif not rec.meta.has_lyrics or not rec.meta.lyrics_path:
@@ -198,16 +265,28 @@ def align(
         out_dir = Path(tmp) / "aligned"
 
         staged: list[ManifestRecord] = []
+        plans: dict[str, tuple[list[Utterance], list[int], bool]] = {}
         for rec in work:
             try:
-                wav = song_dir(data_root, rec.id) / "clean" / "vocals.wav"
+                sdir = song_dir(data_root, rec.id)
+                wav = sdir / "clean" / "vocals.wav"
                 if not wav.exists():
                     raise FileNotFoundError(f"clean vocal missing: {wav}")
-                lyrics = (data_root / rec.meta.lyrics_path).read_text(encoding="utf-8")
+                resolution = load_resolution(sdir)
+                if resolution is not None:
+                    lyrics, unsure = resolution
+                else:
+                    lyrics = (data_root / rec.meta.lyrics_path).read_text(encoding="utf-8")
+                    lyrics, unsure = (plain_lyrics(lyrics) if phrases else lyrics), []
                 spk = corpus / rec.id  # one speaker dir per song
                 spk.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(wav, spk / f"{rec.id}.wav")
-                (spk / f"{rec.id}.lab").write_text(lyrics.strip() + "\n", encoding="utf-8")
+                if phrases:
+                    utts = _stage_phrases(sdir, rec, lyrics, wav, spk)
+                    plans[rec.id] = (utts, unsure, resolution is not None)
+                else:
+                    (spk / f"{rec.id}.lab").write_text(lyrics.strip() + "\n",
+                                                       encoding="utf-8")
                 staged.append(rec)
             except Exception as exc:
                 summary.failed[rec.id] = str(exc)
@@ -229,7 +308,7 @@ def align(
                 sdir = song_dir(data_root, rec.id)
                 align_dir = sdir / "align"
                 align_dir.mkdir(parents=True, exist_ok=True)
-                tg_dst = align_dir / "vocals.TextGrid"
+                tg_dst = align_dir / f"vocals{suffix}.TextGrid"
                 shutil.copyfile(tg_src, tg_dst)
 
                 payload = textgrid_to_phones(
@@ -243,23 +322,33 @@ def align(
                 voiced = _voiced_sec(sdir)
                 score = round(min(1.0, speech_sec / voiced), 4) if voiced else None
 
-                (align_dir / "phones.json").write_text(
+                (align_dir / f"phones{suffix}.json").write_text(
                     dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
-                update_analysis(sdir, "align", {
+                extra: dict = {"mode": "phrases" if phrases else "whole_song"}
+                if phrases:
+                    utts, unsure, resolved = plans[rec.id]
+                    health = utterance_health(utts, payload["phones"], set(unsure))
+                    (align_dir / f"utterances{suffix}.json").write_text(
+                        dumps(health, ensure_ascii=False, indent=1), encoding="utf-8")
+                    extra.update(n_utterances=len(utts), lyrics_resolved=resolved,
+                                 n_unsure_utterances=sum(h["unsure_lyrics"] for h in health))
+                update_analysis(sdir, f"align{suffix}", {
                     "aligner": "mfa",
                     "acoustic_model": cfg.acoustic_model,
                     "dictionary": cfg.dictionary,
                     "phone_set": cfg.phone_set,
+                    **extra,
                     "n_phones": len(payload["phones"]),
                     "speech_sec": round(speech_sec, 3),
                     "align_score": score,
                     "align_score_method": "speech_sec / clean.silence_map.voiced_sec (v1)",
                     "date": _dt.date.today().isoformat(),
                 })
-                rec.status.aligned = True
-                rec.quality.align_score = score
-                manifest.commit(rec)
+                if variant is None:
+                    rec.status.aligned = True
+                    rec.quality.align_score = score
+                    manifest.commit(rec)
                 summary.aligned.append(rec.id)
             except Exception as exc:  # one bad song must not kill the batch
                 summary.failed[rec.id] = str(exc)

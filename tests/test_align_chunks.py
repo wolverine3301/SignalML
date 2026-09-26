@@ -10,6 +10,7 @@ from signalml.stages.align_chunks import (
     frame_level_db,
     line_spans,
     plan_utterances,
+    utterance_health,
     utterances_textgrid,
 )
 
@@ -81,6 +82,46 @@ def test_textgrid_round_trips_through_praatio(tmp_path):
     assert name == 'sng "x"'
     labels = [e.label for e in tg.getTier(name).entries]
     assert labels == [u.text for u in utts]
+
+
+def test_unlyricked_singing_between_lines_is_left_out():
+    # an ad-lib between lines 0 and 1 (in no line) is sung with rests either side
+    segs = [_seg(2.0, LINES[0]), _seg(6.5, ["yeah", "baby", "come", "on"]),
+            _seg(10.0, LINES[1]), _seg(18.0, LINES[2])]
+    lvl = _level([(2.0, 5.0), (6.5, 8.5), (10.0, 13.0), (18.0, 21.0)])
+    utts = plan_utterances(TEXT, segs, lvl, DUR)
+    assert [u.lines for u in utts] == [(0,), (1,), (2,)]
+    # neither neighbour's utterance covers the ad-lib
+    assert utts[0].end <= 6.5 and utts[1].start >= 8.5
+
+
+def test_no_excision_without_real_dips():
+    # the same ad-lib sung legato into both lines: nothing is cut out
+    segs = [_seg(2.0, LINES[0]), _seg(6.5, ["yeah", "baby", "come", "on"]),
+            _seg(10.0, LINES[1]), _seg(18.0, LINES[2])]
+    utts = plan_utterances(TEXT, segs, _level([(2.0, 13.0), (18.0, 21.0)]), DUR)
+    assert utts[0].lines == (0, 1)
+
+
+def test_excision_can_be_turned_off():
+    segs = [_seg(2.0, LINES[0]), _seg(6.5, ["yeah", "baby", "come", "on"]),
+            _seg(10.0, LINES[1]), _seg(18.0, LINES[2])]
+    lvl = _level([(2.0, 5.0), (6.5, 8.5), (10.0, 13.0), (18.0, 21.0)])
+    utts = plan_utterances(TEXT, segs, lvl, DUR, excise_gaps=False)
+    assert all(a.end == b.start for a, b in zip(utts, utts[1:]))
+
+
+def test_utterance_health_counts_floor_stacking():
+    utts = plan_utterances(TEXT, SEGS, _level(SUNG), DUR)
+    phones = ([{"ph": "a", "start": 2.0 + 0.03 * i, "end": 2.03 + 0.03 * i}
+               for i in range(10)]                                 # 10 floor phones
+              + [{"ph": "b", "start": 10.0, "end": 16.0}]          # one 6 s phone
+              + [{"ph": "spn", "start": 18.0, "end": 18.5, "noise": True}])
+    h = utterance_health(utts, phones, unsure_lines={2})
+    assert h[0]["floor_frac"] == 1.0 and h[0]["max_floor_run"] == 10
+    assert h[1]["max_phone_sec"] == 6.0 and h[1]["floor_frac"] == 0.0
+    assert h[2]["n_noise"] == 1 and h[2]["unsure_lyrics"] is True
+    assert not h[0]["unsure_lyrics"]
 
 
 def test_frame_level_db_tracks_loudness():
