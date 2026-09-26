@@ -158,14 +158,17 @@ sung line, so gating on them throws good phrases away.
 Plants one departure into hand-corrected lyrics and resolves against the real Whisper
 transcript (2026-09-26):
 
-| planted | resolve's decision |
+| planted | resolve |
 |---|---|
-| `(echo)` never sung | dropped 92.3%, unsure 4.2%, kept 3.6% |
-| `(echo)` sung | kept 94.9%, unsure 2.8%, dropped 2.4% |
-| clean lyrics | unchanged in 91% of songs |
-| 2-4 lines from another song | fully removed in 54%; damage elsewhere 4% |
+| `(echo)` never sung | group dropped 92.3%, unsure 4.2%, kept 3.6% |
+| `(echo)` sung | group kept 94.9%, unsure 2.8%, dropped 2.4% |
+| clean lyrics | unchanged in 89% of songs |
+| 2-4 lines from another song | fully removed in 55%; damage elsewhere 5% |
 
-Tested and **not** enabled: re-inserting a repeated line the text omits (restores 48%
-of omitted repeats but doubles damage to clean lyrics, 9% -> 18%), and replacing a text
-word with a confidently heard one (fixes 6% of swapped words, damages 89% of clean
-lyrics - Whisper mishears sung words far more often than covers change them).
+Before unheard lines needed time/audio evidence to be dropped, clean lyrics were
+damaged in 14% of songs - Whisper-skipped chorus repeats, dropped.
+
+Tested and **not** enabled: re-inserting a repeated line the text omits (restores 49%
+of omitted repeats but raises damage to clean lyrics from 11% to 18%), and replacing a
+text word with a confidently heard one (fixes 6% of swapped words, damages 90% of
+clean lyrics - Whisper mishears sung words far more often than covers change them).
