@@ -62,6 +62,15 @@ def test_syllable_mode_keeps_each_notes_phones():
     assert first["ph_seq"] == "SP b iː ɪ ŋ s t ej SP" and groups == [1, 2, 2, 3, 1]
 
 
+def test_phone_merge_folds_score_phonemes():
+    s = Score(bpm=100, phone_set="mfa_ipa/en_v1", notes=[
+        _n(1.0, 1.5, 60, "tell", ["tʰ", "ɛ", "ɫ"])])
+    plain = score_to_ds(s)[0]["ph_seq"].split()
+    merged = score_to_ds(s, phone_merge="consonant_core")[0]["ph_seq"].split()
+    assert "tʰ" in plain and "ɫ" in plain
+    assert merged == ["SP", "t", "ɛ", "l", "SP"]
+
+
 def test_inner_rest_and_sliver():
     s = Score(bpm=100, phone_set="mfa_ipa/en_v1", notes=[
         _n(1.0, 1.5, 60, "a", ["ej"]),

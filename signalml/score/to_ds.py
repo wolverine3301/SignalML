@@ -48,8 +48,8 @@ def note_name(midi: int) -> str:
     return f"{_NAMES[midi % 12]}{midi // 12 - 1}"
 
 
-def _groups(units: list[tuple[str, list[str]]], mode: PhNumMode, phone_set: str
-            ) -> list[list[str]]:
+def _groups(units: list[tuple[str, list[str]]], mode: PhNumMode, phone_set: str,
+            merge: dict[str, str] | None = None) -> list[list[str]]:
     """``units`` = (kind, phones) per non-slur note, kind 'rest' or 'note'. Returns one
     phone group per unit (never empty)."""
     is_nucleus = get_phone_set(phone_set).is_nucleus
@@ -58,6 +58,7 @@ def _groups(units: list[tuple[str, list[str]]], mode: PhNumMode, phone_set: str
         if kind == REST:
             groups.append([SP])
             continue
+        phones = [(merge or {}).get(ph, ph) for ph in phones]
         if mode == "vowel_onset" and groups:
             first = next((i for i, ph in enumerate(phones) if is_nucleus(ph)), None)
             if first:  # 0 = starts on its vowel; None = no nucleus, keep everything
@@ -68,7 +69,7 @@ def _groups(units: list[tuple[str, list[str]]], mode: PhNumMode, phone_set: str
 
 
 def segment_to_ds(notes: list[NoteEvent], *, phone_set: str, mode: PhNumMode = "vowel_onset",
-                  pad_sec: float = 0.5) -> dict:
+                  pad_sec: float = 0.5, phone_merge: str = "none") -> dict:
     """One phrase -> one ``.ds`` segment dict."""
     start = max(0.0, notes[0].start - pad_sec)
     seq: list[str] = []
@@ -97,7 +98,9 @@ def segment_to_ds(notes: list[NoteEvent], *, phone_set: str, mode: PhNumMode = "
             add(REST, gap, False, REST, [])
     add(REST, pad_sec, False, REST, [])
 
-    groups = _groups(units, mode, phone_set)
+    from .phoneset import PHONE_MERGES
+
+    groups = _groups(units, mode, phone_set, PHONE_MERGES[phone_merge])
     return {
         "offset": round(start, 6),
         "text": " ".join(n.syllable for n in notes if not n.slur),
@@ -110,9 +113,13 @@ def segment_to_ds(notes: list[NoteEvent], *, phone_set: str, mode: PhNumMode = "
 
 
 def score_to_ds(score: Score, *, mode: PhNumMode = "vowel_onset", pad_sec: float = 0.5,
-                min_rest_sec: float = DEFAULT_MIN_REST_SEC) -> list[dict]:
-    """A whole score -> the ``.ds`` list, one entry per phrase segment."""
-    return [segment_to_ds(seg.notes, phone_set=score.phone_set, mode=mode, pad_sec=pad_sec)
+                min_rest_sec: float = DEFAULT_MIN_REST_SEC,
+                phone_merge: str = "none") -> list[dict]:
+    """A whole score -> the ``.ds`` list, one entry per phrase segment. ``phone_merge``
+    folds phoneme variants the same way the training data was (and helps any model:
+    dictionary variants a model rarely saw fold into ones it saw thousands of times)."""
+    return [segment_to_ds(seg.notes, phone_set=score.phone_set, mode=mode, pad_sec=pad_sec,
+                          phone_merge=phone_merge)
             for seg in split_segments(score, min_rest_sec=min_rest_sec)]
 
 

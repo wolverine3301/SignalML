@@ -529,7 +529,7 @@ def _cmd_score_to_ds(args: argparse.Namespace) -> int:
 
     score = load_score(args.score)
     segments = score_to_ds(score, mode=args.ph_num_mode, pad_sec=args.pad,
-                           min_rest_sec=args.min_rest)
+                           min_rest_sec=args.min_rest, phone_merge=args.phone_merge)
     out = Path(args.out) if args.out else Path(args.score).with_suffix(".ds")
     write_ds(segments, out)
     print(f"{args.score} -> {out}: {len(segments)} segment(s), ph_num {args.ph_num_mode}")
@@ -1316,6 +1316,10 @@ def main(argv: list[str] | None = None) -> int:
     to_ds_p.add_argument("--min-rest", type=float, default=DEFAULT_MIN_REST_SEC,
                          help=f"rest length that opens a new phrase "
                               f"(default: {DEFAULT_MIN_REST_SEC}s)")
+    to_ds_p.add_argument("--phone-merge", default="none", choices=["none", "consonant_core"],
+                         help="fold phoneme variants like the training data "
+                              "(segmentation.phone_merge); consonant_core also helps "
+                              "a model that rarely saw aspirated/dialect stops")
     to_ds_p.set_defaults(func=_cmd_score_to_ds)
     upgrade_p = score_sub.add_parser(
         "upgrade", help="rewrite score.json at the current format (mints note ids)"
