@@ -193,6 +193,30 @@ def _cmd_features(args: argparse.Namespace) -> int:
     return 0 if not summary.failed else 1
 
 
+def _cmd_manifest_import_batch(args: argparse.Namespace) -> int:
+    from .ingest.batch import import_batch
+    from .manifest import resolve_data_root
+
+    licenses = {}
+    for item in args.license or []:
+        singer, sep, note = item.partition("=")
+        if not sep or not singer.strip() or not note.strip():
+            print(f"import-batch: --license wants SINGER=NOTE, got {item!r}", file=sys.stderr)
+            return 1
+        licenses[singer.strip()] = note.strip()
+    s = import_batch(args.src, resolve_data_root(args.data_root), batch=args.batch,
+                     genre=args.genre, processing=args.processing, licenses=licenses,
+                     language=args.language, gender=args.gender)
+    print(f"import-batch {args.batch}: {len(s.placed)} placed, {len(s.already_present)} "
+          f"already present, {len(s.new_records)} new manifest record(s)")
+    for song, why in s.skipped.items():
+        print(f"  SKIPPED {song}: {why}")
+    if s.new_records:
+        print("next: signalml separate, then signalml clean --profile prod, then "
+              "signalml lyrics --check, then signalml align")
+    return 0
+
+
 def _cmd_manifest_import_stems(args: argparse.Namespace) -> int:
     from .manifest import import_stem_folders, resolve_data_root
 
@@ -984,6 +1008,22 @@ def main(argv: list[str] | None = None) -> int:
                           help="studio = real dry stems (also defaults processing=dry)")
     import_p.add_argument("--corpus", default=None, help="corpus slug for new records")
     import_p.set_defaults(func=_cmd_manifest_import_stems)
+    batch_p = manifest_sub.add_parser(
+        "import-batch",
+        help="import a hand-curated <src>/<singer>/<song>/{audio,lyrics .txt} folder",
+    )
+    batch_p.add_argument("--src", required=True, help="folder with one subfolder per singer")
+    batch_p.add_argument("--batch", required=True, help="lands in RAW/<batch>/")
+    batch_p.add_argument("--genre", default=None, help="GENRE tag for every song")
+    batch_p.add_argument("--processing", default=None, choices=["dry", "produced", "heavy"],
+                         help="PROCESSING tag for every song")
+    batch_p.add_argument("--license", action="append", default=None, metavar="SINGER=NOTE",
+                         help="licence note for one singer (repeatable)")
+    batch_p.add_argument("--language", default="en")
+    batch_p.add_argument("--gender", default="F", choices=["F", "M"])
+    batch_p.add_argument("--data-root", default=None,
+                         help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    batch_p.set_defaults(func=_cmd_manifest_import_batch)
     retag_p = manifest_sub.add_parser(
         "retag", help="refresh tag fields on existing records from META.txt sidecars"
     )
