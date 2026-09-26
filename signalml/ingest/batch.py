@@ -63,6 +63,21 @@ def safe_name(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")[:120] or "untitled"
 
 
+# The song name appears twice in RAW/<batch>/<singer>/<song>/<song>.wav; a 95-character
+# YouTube title then pushes the path past Windows' 260-character limit, which ffmpeg
+# (and other tools) cannot open.
+MAX_SONG_NAME = 64
+
+
+def short_name(name: str, limit: int = MAX_SONG_NAME) -> str:
+    """``safe_name`` capped at ``limit`` characters, keeping the tail: harvest fetch ends
+    folder names with the video id, which is what keeps two covers of a song apart."""
+    name = safe_name(name)
+    if len(name) <= limit:
+        return name
+    return f"{name[:limit - 13].rstrip(' .-_')}~{name[-12:]}"
+
+
 @dataclass
 class BatchSummary:
     placed: list[Path] = field(default_factory=list)
@@ -111,6 +126,8 @@ def import_batch(
                 summary.skipped[str(song)] = "lyrics .txt is empty - paste the lyrics first"
                 continue
             name = safe_name(song.name)
+            if not (base / singer / name).exists():  # an earlier import keeps its folder
+                name = short_name(song.name)
             dst = base / singer / name
             wav = dst / f"{name}.wav"
             dst.mkdir(parents=True, exist_ok=True)

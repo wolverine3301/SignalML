@@ -41,7 +41,8 @@ from .lyrics_check import MIN_MISSING, norm_words
 
 RESOLVED_NAME = "resolved.txt"
 RESOLVE_JSON = "resolve.json"
-RESOLVE_VERSION = 1
+SOURCE_NAME = "lyrics.source.txt"  # what import-batch keeps of the pasted lyrics
+RESOLVE_VERSION = 2  # 2: aligner spelling (normalize_for_alignment), pasted source
 
 # A parenthesised group counts as sung when at least this share of its words matched.
 HEARD_FRAC = 0.5
@@ -65,9 +66,41 @@ _INSTRUCTION = re.compile(
 _BRACKET = re.compile(r"\(([^()]*)\)?|\[[^\]]*\]?")
 
 
+_ONES = ("zero one two three four five six seven eight nine ten eleven twelve thirteen "
+         "fourteen fifteen sixteen seventeen eighteen nineteen").split()
+_TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+
+
+def _number_words(n: int) -> str:
+    if n < 20:
+        return _ONES[n]
+    if n < 100:
+        return _TENS[n // 10] + ("" if n % 10 == 0 else " " + _ONES[n % 10])
+    if n < 1000:
+        rest = n % 100
+        return _ONES[n // 100] + " hundred" + ("" if rest == 0 else " " + _number_words(rest))
+    return str(n)
+
+
+def normalize_for_alignment(s: str) -> str:
+    """The aligner's spelling of a lyric line: typographic quotes and dashes to plain
+    ASCII, stutter/compound hyphens to spaces ("to-to-touch", "oh-oh"), ``&`` to "and",
+    small numbers to words, stray symbols dropped. Every one of those otherwise reaches
+    MFA as an out-of-dictionary token, which aligns as spn and costs the whole clip."""
+    s = s.replace("’", "'").replace("‘", "'").replace("ʼ", "'")
+    s = s.replace("`", "'").replace("´", "'")
+    s = re.sub(r"[“”„\"]", " ", s)
+    s = re.sub(r"[‐-―−]", " ", s)          # typographic dashes
+    s = re.sub(r"(?<=[^\W\d_])-(?=[^\W\d_])", " ", s)       # to-to-touch, oh-oh
+    s = s.replace("&", " and ").replace("…", " ")
+    s = re.sub(r"\b\d{1,3}\b", lambda m: _number_words(int(m.group(0))), s)
+    s = re.sub(r"[^\w' ,.!?;:]|_", " ", s)                  # letters (any script) stay
+    return " ".join(s.split())
+
+
 def _clean(s: str) -> str:
-    """Stray bracket characters out, whitespace collapsed."""
-    return " ".join(re.sub(r"[()\[\]{}]", " ", s).split())
+    """Stray bracket characters out, aligner spelling, whitespace collapsed."""
+    return normalize_for_alignment(re.sub(r"[()\[\]{}]", " ", s))
 
 
 @dataclass
@@ -280,6 +313,14 @@ def resolve(text: str, segments: list[dict]) -> Resolution:
                       lines=line_log, groups=groups)
 
 
+def human_lyrics_source(lyrics_path: Path) -> Path:
+    """The text to resolve: ``manifest import-batch`` tidies ``lyrics.txt`` (brackets
+    stripped, words kept) and keeps what was pasted as ``lyrics.source.txt`` beside it;
+    only the pasted text still says which words were in parentheses."""
+    source = lyrics_path.with_name(SOURCE_NAME)
+    return source if lyrics_path.name == "lyrics.txt" and source.exists() else lyrics_path
+
+
 def load_resolution(sdir: Path) -> tuple[str, list[int]] | None:
     """(resolved text, unsure line indices) if this song has been resolved."""
     txt, meta = sdir / "lyrics" / RESOLVED_NAME, sdir / "lyrics" / RESOLVE_JSON
@@ -325,12 +366,17 @@ def run_resolve(data_root: str | Path, *, ids: list[str] | None = None,
             asr = json.loads((sdir / "lyrics" / ASR_NAME).read_text(encoding="utf-8"))
             if "error" in asr:
                 raise RuntimeError(f"asr.json holds an error: {asr['error']}")
-            text = (data_root / rec.meta.lyrics_path).read_text(encoding="utf-8",
-                                                                errors="replace")
+            source = human_lyrics_source(data_root / rec.meta.lyrics_path)
+            text = source.read_text(encoding="utf-8", errors="replace")
+            if source.name == SOURCE_NAME:
+                from ..ingest.batch import cut_note
+
+                text = cut_note(text)[0]
             res = resolve(text, asr.get("segments", []))
             (sdir / "lyrics" / RESOLVED_NAME).write_text(res.text + "\n", encoding="utf-8")
             (sdir / "lyrics" / RESOLVE_JSON).write_text(json.dumps({
-                "version": RESOLVE_VERSION, "source": rec.meta.lyrics_path,
+                "version": RESOLVE_VERSION,
+                "source": source.relative_to(data_root).as_posix(),
                 "asr_model": asr.get("model"), "agreement": res.agreement,
                 "unsure_lines": res.unsure_lines, "counts": res.counts(),
                 "lines": res.lines, "groups": res.groups,

@@ -142,3 +142,39 @@ def test_align_reads_the_resolved_text(tmp_path, make_wav):
 
     align(root, runner=runner)
     assert seen["lab"].strip() == "shine"
+
+
+def test_normalize_for_alignment():
+    from signalml.stages.lyrics_resolve import normalize_for_alignment as n
+
+    assert n("Thank God for heartbreak showers \u2019cause now I'm growin' wildflowers") == \
+        "Thank God for heartbreak showers 'cause now I'm growin' wildflowers"
+    assert n("to-to-touch me, oh-oh \u2013 Shenandoah River \u2014") == \
+        "to to touch me, oh oh Shenandoah River"
+    assert n("you & me, 2 hearts, 21 guns, 1999") == "you and me, two hearts, twenty one guns, 1999"
+    assert n("caf\u00e9 * # ~ \u201cquoted\u201d") == "caf\u00e9 quoted"
+
+
+def test_import_batch_songs_resolve_from_the_pasted_source(tmp_path, make_wav):
+    # import-batch leaves lyrics.txt bracket-free and keeps the pasted text beside it
+    root, sdir = _root(tmp_path, make_wav, "I know I know\n" + "\n".join(VERSE) + "\n")
+    rec = Manifest.for_data_root(root).get("sng_0001")
+    lyr = root / rec.meta.lyrics_path
+    lyr.rename(lyr.with_name("lyrics.txt"))
+    src = lyr.with_name("lyrics.source.txt")
+    src.write_text("I know (I know)\n" + "\n".join(VERSE) + "\nNote: cut after 2:03\n",
+                   encoding="utf-8")
+    m = Manifest.for_data_root(root)
+    rec = m.get("sng_0001")
+    rec.meta.lyrics_path = lyr.with_name("lyrics.txt").relative_to(root).as_posix()
+    m.upsert(rec)
+    m.save()
+    (sdir / "lyrics").mkdir(parents=True)
+    (sdir / "lyrics" / "asr.json").write_text(
+        json.dumps({"segments": _segs("I know", *VERSE)}), encoding="utf-8")
+    s = run_resolve(root)
+    res = s.resolved["sng_0001"]
+    assert [g["decision"] for g in res.groups] == ["drop"]      # the parens were seen
+    assert "note" not in res.text.lower()                       # the cut note never is
+    meta = json.loads((sdir / "lyrics" / "resolve.json").read_text(encoding="utf-8"))
+    assert meta["source"].endswith("lyrics.source.txt")

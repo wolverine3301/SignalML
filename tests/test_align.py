@@ -207,3 +207,36 @@ def test_load_align_config_defaults_and_file(tmp_path):
     assert cfg.beam == 40
     assert cfg.strict_phones is False
     assert cfg.acoustic_model == "english_mfa"  # default preserved
+
+
+def test_aligner_tokens_keep_and_strip_edge_apostrophes():
+    from signalml.stages.align import aligner_tokens
+
+    assert aligner_tokens("'Cause I'm growin' wildflowers, don't") == {
+        "'cause", "cause", "i'm", "growin'", "growin", "wildflowers", "don't"}
+
+
+def test_g2p_spells_oov_words_into_the_run_dictionary(data_root, tmp_path):
+    lyr = data_root / Manifest.for_data_root(data_root).get("sng_0001").meta.lyrics_path
+    lyr.write_text("shine tryna\n", encoding="utf-8")
+    dict_file = tmp_path / "d.dict"
+    dict_file.write_text("shine\t\u0283 aj n\n", encoding="utf-8")
+    cfg = AlignConfig(g2p_model="english_us_mfa", dictionary_file=str(dict_file))
+    seen = {}
+
+    def runner(cmd):
+        if "g2p" in cmd:
+            i = cmd.index("g2p")
+            seen["oov"] = Path(cmd[i + 1]).read_text(encoding="utf-8").split()
+            Path(cmd[i + 3]).write_text("tryna\tt \u0279 aj n \u0259\n", encoding="utf-8")
+            return
+        i = cmd.index("align")
+        seen["dict"] = Path(cmd[i + 3]).read_text(encoding="utf-8")
+        fake_mfa_runner(cmd)
+
+    s = align(data_root, cfg=cfg, runner=runner)
+    assert s.aligned == ["sng_0001"] and seen["oov"] == ["tryna"]
+    assert "shine\t" in seen["dict"] and "tryna\t" in seen["dict"]
+    analysis = json.loads((song_dir(data_root, "sng_0001") / "analysis.json")
+                          .read_text(encoding="utf-8"))
+    assert analysis["align"]["oov_g2p"] == ["tryna"]

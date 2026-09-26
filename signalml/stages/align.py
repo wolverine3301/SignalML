@@ -17,6 +17,7 @@ the energy detector calls speech; low values flag songs to exclude from training
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import re
 import shutil
 import subprocess
@@ -56,6 +57,14 @@ class AlignConfig(BaseModel):
     retry_beam: int = 400
     num_jobs: int = 4
     strict_phones: bool = True
+    # Out-of-dictionary words (typos, "growin'", "tryna", invented words) align as spn,
+    # and a clip with spn is dropped from datasets - measured 2026-09-25 as a sizeable
+    # share of the corpus's clips. With a G2P model named here, align spells every OOV word
+    # of the run with it (`mfa g2p`) and aligns against dictionary + those words.
+    g2p_model: str | None = None
+    # the dictionary's .dict file, read to find OOVs; None = MFA's pretrained store
+    # ($MFA_ROOT_DIR or ~/Documents/MFA)/pretrained_models/dictionary/<dictionary>.dict
+    dictionary_file: str | None = None
 
 
 def load_align_config(path: str | Path | None = None) -> AlignConfig:
@@ -184,6 +193,51 @@ def _variant_suffix(variant: str | None) -> str:
     return f".{variant}"
 
 
+def _dictionary_path(cfg: AlignConfig) -> Path:
+    if cfg.dictionary_file:
+        return Path(cfg.dictionary_file)
+    mfa_root = Path(os.environ.get("MFA_ROOT_DIR") or Path.home() / "Documents" / "MFA")
+    return mfa_root / "pretrained_models" / "dictionary" / f"{cfg.dictionary}.dict"
+
+
+def aligner_tokens(text: str) -> set[str]:
+    """Words as the dictionary lookup will see them, plus the bare form of a word with
+    edge apostrophes ("growin'" / "growin"), since MFA may strip them either way."""
+    out: set[str] = set()
+    for tok in re.findall(r"[^\W_]+(?:'[^\W_]+)*'?|'[^\W_]+(?:'[^\W_]+)*'?", text.lower()):
+        out.add(tok)
+        if tok.strip("'") != tok and tok.strip("'"):
+            out.add(tok.strip("'"))
+    return out
+
+
+def _g2p_dictionary(cfg: AlignConfig, texts: dict[str, str], work: Path,
+                    runner: Runner) -> tuple[str, dict[str, list[str]]]:
+    """(dictionary argument for `mfa align`, song id -> its OOV words).
+
+    Spells the run's OOV words with ``cfg.g2p_model`` and writes dictionary + them
+    to one file; with nothing out of vocabulary the named dictionary is used as is."""
+    dict_path = _dictionary_path(cfg)
+    if not dict_path.exists():
+        raise FileNotFoundError(f"g2p_model set but no dictionary file at {dict_path} "
+                                f"(set dictionary_file in the align config)")
+    base = dict_path.read_text(encoding="utf-8")
+    known = {ln.split("\t", 1)[0].split(" ", 1)[0].lower()
+             for ln in base.splitlines() if ln.strip()}
+    oov = {rid: sorted(aligner_tokens(t) - known) for rid, t in texts.items()}
+    words = sorted({w for ws in oov.values() for w in ws})
+    if not words:
+        return cfg.dictionary, oov
+    (work / "oov.txt").write_text("\n".join(words) + "\n", encoding="utf-8")
+    runner([*cfg.mfa_command, "g2p", str(work / "oov.txt"), cfg.g2p_model,
+            str(work / "oov.dict"), "--num_jobs", str(cfg.num_jobs)])
+    spelled = (work / "oov.dict").read_text(encoding="utf-8") \
+        if (work / "oov.dict").exists() else ""
+    merged = work / "dictionary_plus_oov.dict"
+    merged.write_text(base.rstrip("\n") + "\n" + spelled, encoding="utf-8")
+    return str(merged), oov
+
+
 def _stage_phrases(sdir: Path, rec: ManifestRecord, text: str, wav: Path,
                    spk: Path) -> list[Utterance]:
     """Plan phrase utterances and write MFA's TextGrid transcript beside the wav."""
@@ -266,6 +320,7 @@ def align(
 
         staged: list[ManifestRecord] = []
         plans: dict[str, tuple[list[Utterance], list[int], bool]] = {}
+        texts: dict[str, str] = {}  # what MFA reads per song, for the OOV pass
         for rec in work:
             try:
                 sdir = song_dir(data_root, rec.id)
@@ -284,18 +339,24 @@ def align(
                 if phrases:
                     utts = _stage_phrases(sdir, rec, lyrics, wav, spk)
                     plans[rec.id] = (utts, unsure, resolution is not None)
+                    texts[rec.id] = "\n".join(u.text for u in utts)
                 else:
                     (spk / f"{rec.id}.lab").write_text(lyrics.strip() + "\n",
                                                        encoding="utf-8")
+                    texts[rec.id] = lyrics
                 staged.append(rec)
             except Exception as exc:
                 summary.failed[rec.id] = str(exc)
         if not staged:
             return summary
 
+        dictionary, oov = cfg.dictionary, {}
+        if cfg.g2p_model:
+            dictionary, oov = _g2p_dictionary(cfg, texts, Path(tmp), runner)
+
         runner([
             *cfg.mfa_command, "align", "--clean",
-            str(corpus), cfg.dictionary, cfg.acoustic_model, str(out_dir),
+            str(corpus), dictionary, cfg.acoustic_model, str(out_dir),
             "--beam", str(cfg.beam), "--retry_beam", str(cfg.retry_beam),
             "--num_jobs", str(cfg.num_jobs),
         ])
@@ -326,6 +387,8 @@ def align(
                     dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
                 extra: dict = {"mode": "phrases" if phrases else "whole_song"}
+                if cfg.g2p_model:
+                    extra.update(g2p_model=cfg.g2p_model, oov_g2p=oov.get(rec.id, []))
                 if phrases:
                     utts, unsure, resolved = plans[rec.id]
                     health = utterance_health(utts, payload["phones"], set(unsure))

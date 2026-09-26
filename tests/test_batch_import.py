@@ -84,3 +84,13 @@ def test_cut_note_trims_audio_and_leaves_the_lyrics(tmp_path, make_wav):
     assert abs(rec.file.duration_sec - 1.0) < 0.01 and rec.status.separated is False
     lyrics = root / "RAW" / "b1" / "nova reyes" / "Harbor" / "lyrics.txt"
     assert lyrics.read_text(encoding="utf-8") == "hold the light\n"
+
+
+def test_short_name_keeps_the_video_id_and_fits():
+    from signalml.ingest.batch import MAX_SONG_NAME, short_name
+
+    long = ("Harbor Lights at Midnight - The Lanterns & Kestrel (Nova Reyes "
+            "Official Cover Video)-hB9x_Q2kLmZ")
+    s = short_name(long)
+    assert len(s) <= MAX_SONG_NAME and s.endswith("-hB9x_Q2kLmZ")
+    assert short_name("Short title-abc") == "Short title-abc"
