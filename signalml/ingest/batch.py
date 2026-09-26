@@ -79,12 +79,16 @@ def import_batch(
         singer = singer_dir.name.strip().lower()
         for song in sorted(p for p in singer_dir.iterdir() if p.is_dir()):
             audio = [p for p in song.iterdir() if p.suffix.lower() in AUDIO_EXTS]
-            texts = [p for p in song.iterdir() if p.suffix.lower() == ".txt"]
+            texts = [p for p in song.iterdir() if p.suffix.lower() == ".txt"
+                     and p.name != "lyrics.source.txt"]
             if len(audio) != 1:
                 summary.skipped[str(song)] = f"expected 1 audio file, found {len(audio)}"
                 continue
             if len(texts) != 1:
                 summary.skipped[str(song)] = f"expected 1 lyrics .txt, found {len(texts)}"
+                continue
+            if not tidy_lyrics(texts[0].read_text(encoding="utf-8", errors="replace")).strip():
+                summary.skipped[str(song)] = "lyrics .txt is empty - paste the lyrics first"
                 continue
             name = safe_name(song.name)
             dst = base / singer / name
@@ -103,6 +107,9 @@ def import_batch(
             (dst / "lyrics.txt").write_text(tidy_lyrics(raw), encoding="utf-8")
             meta = [f"SONG:{song.name}", f"SINGER:{singer}", "ARTIST:",
                     f"GENRE:{genre or ''}", "TYPE:", "QUALITY:"]
+            url_file = song / "source.url"
+            if url_file.exists():
+                meta.append(f"SOURCE_URL:{url_file.read_text(encoding='utf-8').strip()}")
             if processing:
                 meta.append(f"PROCESSING:{processing}")
             if singer in licenses:

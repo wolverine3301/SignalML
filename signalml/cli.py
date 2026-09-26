@@ -102,6 +102,27 @@ def _cmd_harvest_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_harvest_fetch(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from .ingest.fetch import fetch
+
+    urls = list(args.url)
+    if args.urls:
+        urls += Path(args.urls).read_text(encoding="utf-8").splitlines()
+    if not urls:
+        print("harvest fetch: no URLs (pass them, or --urls FILE)", file=sys.stderr)
+        return 1
+    s = fetch(urls, args.singer, args.out)
+    print(f"harvest fetch {args.singer}: {len(s.fetched)} downloaded, "
+          f"{len(s.already)} already there, {len(s.failed)} failed")
+    for url, err in s.failed.items():
+        print(f"  FAILED {url}: {err}")
+    print(f"next: paste lyrics into each lyrics.txt under {Path(args.out) / args.singer}, "
+          f"then: signalml manifest import-batch --src \"{args.out}\" --batch <name>")
+    return 0 if not s.failed else 1
+
+
 def _cmd_harvest_inbox(args: argparse.Namespace) -> int:
     from pathlib import Path
 
@@ -1167,6 +1188,13 @@ def main(argv: list[str] | None = None) -> int:
     hinbox_p.add_argument("--data-root", default=None,
                           help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
     hinbox_p.set_defaults(func=_cmd_harvest_inbox)
+    hfetch_p = harvest_sub.add_parser(
+        "fetch", help="one folder per URL for a singer: audio + empty lyrics.txt to paste into")
+    hfetch_p.add_argument("--singer", required=True, help="singer name (folder name)")
+    hfetch_p.add_argument("url", nargs="*", help="song URLs")
+    hfetch_p.add_argument("--urls", default=None, help="file with one URL per line")
+    hfetch_p.add_argument("--out", required=True, help="batch folder, e.g. 'D:\\batch_01'")
+    hfetch_p.set_defaults(func=_cmd_harvest_fetch)
 
     # separate
     separate_p = subparsers.add_parser("separate", help="[P2] Demucs stem separation")
