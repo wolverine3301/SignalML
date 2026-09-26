@@ -147,6 +147,29 @@ class TestVarianceConfig:
         assert config["predict_breathiness"] is False
         assert config["predict_voicing"] is False
 
+    def test_drops_clips_with_no_sung_note(self, tmp_path, make_wav):
+        """The variance binarizer asserts on a clip whose notes are all rests (a
+        whispered or spoken passage) and aborts the whole run - so they go here, with
+        a one-time backup of the file, and the caller is told which."""
+        out = self._built(tmp_path, make_wav, notes=True)
+        folder = next(out.glob("*-en"))
+        path = folder / "transcriptions.csv"
+        rows = list(csv.DictReader(path.read_text(encoding="utf-8").splitlines()))
+        assert len(rows) >= 2, "fixture needs two clips"
+        rows[0]["note_seq"] = "rest rest"
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+            w.writeheader()
+            w.writerows(rows)
+
+        got = write_variance_config(out)
+        assert got.dropped_all_rest == [rows[0]["name"]]
+        kept = list(csv.DictReader(path.read_text(encoding="utf-8").splitlines()))
+        assert [r["name"] for r in kept] == [r["name"] for r in rows[1:]]
+        assert (folder / "transcriptions.pre_rest_filter.csv").exists()
+        # idempotent: nothing left to drop
+        assert write_variance_config(out, force=True).dropped_all_rest == []
+
     def test_refuses_pitch_without_note_columns(self, tmp_path, make_wav):
         out = self._built(tmp_path, make_wav, notes=False)
         with pytest.raises(RuntimeError, match="note_seq"):

@@ -7,6 +7,7 @@ configured target on fixtures.
 from __future__ import annotations
 
 import json
+import shutil
 
 import numpy as np
 import pyloudnorm as pyln
@@ -89,6 +90,30 @@ def test_requires_separated_and_skips_cleaned(data_root):
     assert summary3.skipped == ["sng_0001"]
     summary4 = clean(data_root, profile=DEV, force=True)
     assert summary4.cleaned == ["sng_0001"]
+
+
+def test_implicit_profile_refuses_to_differ_from_the_corpus(data_root, make_wav, monkeypatch):
+    """The active default is dev, the corpus is prod: a clean without --profile must
+    refuse rather than quietly produce songs no prod dataset will accept."""
+    monkeypatch.delenv("SIGNALML_AUDIO_PROFILE", raising=False)
+    prod = active_profile("prod")
+    assert active_profile().name != prod.name, "test assumes the default is not prod"
+    assert clean(data_root, profile=prod).cleaned == ["sng_0001"]
+
+    # a second separated song arrives
+    make_wav(data_root / "raw" / "song2.wav", seconds=0.5, hz=660)
+    manifest, (rec,) = scan_directory(data_root)
+    rec.status.separated = True
+    manifest.upsert(rec)
+    manifest.save()
+    src = data_root / "songs" / "sng_0001" / "stems"
+    shutil.copytree(src, data_root / "songs" / rec.id / "stems")
+
+    with pytest.raises(ValueError, match="--profile prod"):
+        clean(data_root)
+    assert Manifest.for_data_root(data_root).get(rec.id).status.cleaned is False
+    # an explicit profile is a decision, and is honoured
+    assert clean(data_root, profile=prod).cleaned == [rec.id]
 
 
 def test_missing_stem_fails_song(data_root):

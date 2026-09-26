@@ -152,13 +152,17 @@ def _cmd_clean(args: argparse.Namespace) -> int:
     from .manifest import resolve_data_root
     from .stages.clean import clean, load_clean_config
 
-    summary = clean(
-        resolve_data_root(args.data_root),
-        cfg=load_clean_config(args.config),
-        profile=active_profile(args.profile),
-        force=args.force,
-        limit=args.limit,
-    )
+    try:
+        summary = clean(
+            resolve_data_root(args.data_root),
+            cfg=load_clean_config(args.config),
+            profile=active_profile(args.profile) if args.profile else None,
+            force=args.force,
+            limit=args.limit,
+        )
+    except ValueError as exc:
+        print(f"clean: {exc}", file=sys.stderr)
+        return 1
     print(f"clean: {len(summary.cleaned)} cleaned, "
           f"{len(summary.skipped)} skipped, {len(summary.failed)} failed")
     for rid, err in summary.failed.items():
@@ -666,6 +670,9 @@ def _cmd_dataset_variance_config(args: argparse.Namespace) -> int:
     print(f"  {got.speakers} speaker(s)  predict_dur={got.predict_dur}  "
           f"predict_pitch={got.predict_pitch}")
     print(f"  binary data -> {got.binary_data_dir}")
+    if got.dropped_all_rest:
+        print(f"  dropped {len(got.dropped_all_rest)} clip(s) the transcriber heard no "
+              f"sung note in: {', '.join(got.dropped_all_rest[:8])}")
     print(f"  next: signalml train variance --dataset {args.dataset}")
     return 0
 

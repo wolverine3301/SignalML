@@ -13,6 +13,7 @@ vocals) — it can join as another optional op when there's evidence it's needed
 from __future__ import annotations
 
 import datetime as _dt
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -121,6 +122,22 @@ def process_audio(y: np.ndarray, sr: int, cfg: CleanConfig) -> tuple[np.ndarray,
     return y, stats
 
 
+def corpus_clean_profile(data_root: Path, manifest: Manifest) -> str | None:
+    """The profile most already-cleaned songs were cleaned at (None if none are)."""
+    from collections import Counter
+
+    seen: Counter[str] = Counter()
+    for rec in manifest.records:
+        if not rec.status.cleaned:
+            continue
+        path = song_dir(data_root, rec.id) / "analysis.json"
+        try:
+            seen[json.loads(path.read_text(encoding="utf-8"))["clean"]["profile"]] += 1
+        except (OSError, KeyError, ValueError, TypeError):
+            continue
+    return seen.most_common(1)[0][0] if seen else None
+
+
 def clean(
     data_root: str | Path,
     *,
@@ -129,10 +146,23 @@ def clean(
     force: bool = False,
     limit: int | None = None,
 ) -> CleanSummary:
+    """Clean every separated song that is not cleaned yet.
+
+    ``profile=None`` means "whatever is active" - and then the run refuses if that
+    differs from the profile the corpus is already cleaned at. The active default is
+    ``dev``, the corpus is ``prod``, and a silent dev clean makes new songs vanish
+    from every prod dataset (it happened, 2026-09-25). Pass a profile to override."""
     data_root = Path(data_root)
     cfg = cfg or load_clean_config()
-    profile = profile or active_profile()
     manifest = Manifest.for_data_root(data_root)
+    if profile is None:
+        profile = active_profile()
+        corpus = corpus_clean_profile(data_root, manifest)
+        if corpus is not None and corpus != profile.name:
+            raise ValueError(
+                f"the corpus is cleaned at '{corpus}' but the active profile is "
+                f"'{profile.name}' - pass --profile {corpus} (or --profile "
+                f"{profile.name} if a different profile is really intended)")
     summary = CleanSummary()
 
     work = []

@@ -700,6 +700,7 @@ class VarianceConfig:
     predict_dur: bool
     predict_pitch: bool
     binary_data_dir: Path
+    dropped_all_rest: list[str] = field(default_factory=list)  # clip names
 
 
 def _csv_columns(folder: Path) -> list[str]:
@@ -708,6 +709,34 @@ def _csv_columns(folder: Path) -> list[str]:
         return []
     with open(csv_path, newline="", encoding="utf-8") as fh:
         return next(csv.reader(fh), [])
+
+
+def drop_all_rest_clips(folder: Path) -> list[str]:
+    """Remove clips whose transcribed notes are all ``rest`` from a speaker folder's
+    transcriptions.csv, backing the file up once as transcriptions.pre_rest_filter.csv.
+
+    The transcriber hears no sung note in a whispered or spoken passage, and the
+    variance binarizer asserts on such a clip and aborts the whole run. Their loss is
+    negligible (a handful of clips in the first full run). Returns the dropped names."""
+    import csv
+    import shutil
+
+    csv_path = folder / "transcriptions.csv"
+    with open(csv_path, encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    if not rows or "note_seq" not in rows[0]:
+        return []
+    keep = [r for r in rows if any(n != "rest" for n in r["note_seq"].split())]
+    if len(keep) == len(rows):
+        return []
+    backup = folder / "transcriptions.pre_rest_filter.csv"
+    if not backup.exists():
+        shutil.copyfile(csv_path, backup)
+    with open(csv_path, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(keep)
+    return [r["name"] for r in rows if r not in keep]
 
 
 def write_variance_config(
@@ -759,6 +788,11 @@ def write_variance_config(
                     f"or generate the config with predict_pitch off")
     if problems:
         raise RuntimeError("variance config refused:\n  " + "\n  ".join(problems))
+
+    dropped: list[str] = []
+    if predict_pitch:
+        for entry in acoustic.get("datasets", []):
+            dropped += drop_all_rest_clips(Path(entry["raw_data_dir"]))
 
     opts = trainer_opts or TrainerOpts()
     config = {
@@ -813,5 +847,6 @@ def write_variance_config(
         speakers=len(config["datasets"]),
         predict_dur=predict_dur,
         predict_pitch=predict_pitch,
+        dropped_all_rest=dropped,
         binary_data_dir=Path(config["binary_data_dir"]),
     )
