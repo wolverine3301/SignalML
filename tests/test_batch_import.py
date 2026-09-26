@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import shutil
-
 from signalml.ingest.batch import import_batch, tidy_lyrics
 from signalml.manifest import Manifest
 
 
-def _copy(src, dst):
-    shutil.copyfile(src, dst)
+def _copy(src, dst, end=None):
+    """Stands in for ffmpeg: copies, and honours a cut by truncating the samples."""
+    import soundfile as sf
+
+    y, sr = sf.read(str(src))
+    sf.write(str(dst), y[: int(end * sr)] if end is not None else y, sr)
 
 
 def _src(tmp_path, make_wav):
@@ -57,3 +59,28 @@ def test_reimport_is_idempotent(tmp_path, make_wav):
     again = import_batch(src, root, batch="b1", converter=_copy)
     assert again.placed == [] and len(again.already_present) == 2
     assert again.new_records == [] and len(Manifest.for_data_root(root).records) == 2
+
+
+def test_cut_note_trims_audio_and_leaves_the_lyrics(tmp_path, make_wav):
+    """`note: cut after M:SS` in a lyrics file marks where the singing ends; it is an
+    instruction, never lyrics. Arriving after import, it re-trims the same record."""
+    src, root = tmp_path / "incoming", tmp_path / "dr"
+    song = src / "Nova Reyes" / "Harbor"
+    make_wav(song / "Harbor.wav", seconds=3.0, hz=220)
+    (song / "lyrics.txt").write_text("hold the light\n", encoding="utf-8")
+    import_batch(src, root, batch="b1", converter=_copy)
+    (rec,) = Manifest.for_data_root(root).records
+    assert abs(rec.file.duration_sec - 3.0) < 0.01
+    rec.status.separated = True
+    m = Manifest.for_data_root(root)
+    m.upsert(rec)
+    m.save()
+
+    (song / "lyrics.txt").write_text("hold the light\nnote: cut audio after 0:01\n",
+                                     encoding="utf-8")
+    s = import_batch(src, root, batch="b1", converter=_copy)
+    assert len(s.retrimmed) == 1 and s.new_records == []
+    (rec,) = Manifest.for_data_root(root).records          # same record, new audio
+    assert abs(rec.file.duration_sec - 1.0) < 0.01 and rec.status.separated is False
+    lyrics = root / "RAW" / "b1" / "nova reyes" / "Harbor" / "lyrics.txt"
+    assert lyrics.read_text(encoding="utf-8") == "hold the light\n"

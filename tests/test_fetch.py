@@ -43,7 +43,8 @@ def test_import_skips_empty_lyrics_and_records_source(tmp_path, make_wav):
     filled = out / "Nova Reyes" / "Harbor A (Acoustic)-AAAAAAAAAAA" / "lyrics.txt"
     filled.write_text("hold the light across the water\n", encoding="utf-8")
 
-    s = import_batch(out, root, batch="b1", converter=lambda a, b: b.write_bytes(a.read_bytes()))
+    s = import_batch(out, root, batch="b1",
+                     converter=lambda a, b, e=None: b.write_bytes(a.read_bytes()))
     assert len(s.new_records) == 1
     assert any("empty" in why for why in s.skipped.values())
     (rec,) = Manifest.for_data_root(root).records
