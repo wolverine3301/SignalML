@@ -400,6 +400,19 @@ def _profile_of(sdir: Path) -> str | None:
         return None
 
 
+def _variant_score(data_root: Path, song_id: str, variant: str) -> float | None:
+    """align_score of an ``align --variant`` alignment (kept in analysis.json, since a
+    variant never touches the manifest), or None when the song has no such alignment."""
+    sdir = song_dir(data_root, song_id)
+    if not (sdir / "align" / f"phones.{variant}.json").exists():
+        return None
+    try:
+        data = json.loads((sdir / "analysis.json").read_text(encoding="utf-8"))
+        return float(data[f"align.{variant}"]["align_score"])
+    except (OSError, KeyError, TypeError, ValueError):
+        return None
+
+
 def _select(manifest: Manifest, recipe: DatasetRecipe, summary: BuildSummary,
             data_root: Path) -> list[ManifestRecord]:
     f = recipe.filters
@@ -430,11 +443,16 @@ def _select(manifest: Manifest, recipe: DatasetRecipe, summary: BuildSummary,
             reason = "singer is null — the timbre space needs singer labels"
         elif rec.meta.processing in f.exclude_processing:
             reason = f"processing {rec.meta.processing!r} excluded by recipe"
-        elif not (rec.status.cleaned and rec.status.aligned):
-            reason = "not cleaned+aligned yet"
-        elif rec.quality.align_score is None or \
-                rec.quality.align_score < f.min_align_score:
-            reason = f"align_score {rec.quality.align_score} < {f.min_align_score}"
+        elif not rec.status.cleaned or not (
+                _variant_score(data_root, rec.id, recipe.alignment_variant) is not None
+                if recipe.alignment_variant else rec.status.aligned):
+            reason = "not cleaned+aligned yet" + (
+                f" (no {recipe.alignment_variant!r} alignment)"
+                if recipe.alignment_variant else "")
+        elif (score := (_variant_score(data_root, rec.id, recipe.alignment_variant)
+                        if recipe.alignment_variant else rec.quality.align_score)) is None \
+                or score < f.min_align_score:
+            reason = f"align_score {score} < {f.min_align_score}"
         else:
             profile = _profile_of(song_dir(data_root, rec.id))
             if profile != recipe.profile:
@@ -611,7 +629,9 @@ def build(
         summary.seconds += sum(c.end - c.start for c in clips)
         licenses.add(rec.meta.license_note or "(none recorded)")
         corpora.add(rec.meta.corpus or "(untagged)")
-        align_scores.append(rec.quality.align_score)
+        align_scores.append(
+            _variant_score(data_root, rec.id, recipe.alignment_variant)
+            if recipe.alignment_variant else rec.quality.align_score)
 
     for folder, rows in per_folder_rows.items():
         with open(out_dir / folder / "transcriptions.csv", "w", newline="",

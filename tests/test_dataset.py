@@ -593,6 +593,13 @@ class TestPhraseGate:
             (adir / "phones.json").read_text(encoding="utf-8"), encoding="utf-8")
         (adir / "utterances.phrase.json").write_text(json.dumps(self.UTTS),
                                                      encoding="utf-8")
+        update_analysis(adir.parent, "align.phrase", {"align_score": 0.95})
+        # a variant alignment stands on its own: the canonical one need not exist
+        m = Manifest.for_data_root(root)
+        rec = m.get(sid)
+        rec.status.aligned, rec.quality.align_score = False, None
+        m.upsert(rec)
+        m.save()
         s = build(root, recipe=recipe(name="gated", alignment_variant="phrase",
                                       phrase_gate={"enabled": True}))
         assert s.clips == 1 and s.gated_phrases == {"floor_frac": 1, "unsure_lyrics": 1}
@@ -604,4 +611,14 @@ class TestPhraseGate:
         root = tmp_path / "dr"
         sid = _ready_song(root, make_wav)
         s = build(root, recipe=recipe(name="nov", alignment_variant="phrase"))
-        assert "phones.phrase.json" in s.skipped[sid]
+        assert "'phrase' alignment" in s.skipped[sid]
+
+    def test_variant_score_gates_like_align_score(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        sid = _ready_song(root, make_wav)
+        adir = song_dir(root, sid) / "align"
+        (adir / "phones.phrase.json").write_text(
+            (adir / "phones.json").read_text(encoding="utf-8"), encoding="utf-8")
+        update_analysis(adir.parent, "align.phrase", {"align_score": 0.5})
+        s = build(root, recipe=recipe(name="low", alignment_variant="phrase"))
+        assert "align_score 0.5" in s.skipped[sid]
