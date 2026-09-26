@@ -46,7 +46,9 @@ phrase_gate:
 
 segmentation:
   split_gap_sec: 0.4
-  min_clip_sec: 2.0
+  # 1.0, not full_v2m's 2.0: phrase labels leave more short fragments between gaps,
+  # and 1.0 keeps +7% clip time over 2.0 (2026-09-26)
+  min_clip_sec: 1.0
   max_clip_sec: 15.0
   pad_sec: 0.15
   inner_sp_min_sec: 0.05
