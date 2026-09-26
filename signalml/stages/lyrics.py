@@ -113,6 +113,46 @@ def _wants_lyrics(rec: ManifestRecord, force: bool) -> bool:
     return force and machine  # hand-written lyrics are never replaced
 
 
+def transcribe_batch(
+    data_root: Path,
+    records: list[ManifestRecord],
+    cfg: LyricsConfig,
+    runner: Callable[[list[str], str | None, float], None],
+) -> dict[str, dict | str]:
+    """One backend invocation over ``records``; returns id -> payload, or an error
+    string for a song that could not be transcribed."""
+    if not cfg.command:
+        raise RuntimeError(
+            "no lyrics command configured - copy configs/lyrics.yaml to "
+            "configs/lyrics.local.yaml and point `command` at the whisper venv + "
+            "scripts/whisper_lyrics.py")
+    stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    batch_dir = data_root / "work" / f"lyrics_{stamp}"
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    results: dict[str, dict | str] = {}
+    jobs, by_out = [], {}
+    for rec in records:
+        wav = song_dir(data_root, rec.id) / "clean" / f"{cfg.stem}.wav"
+        if not wav.exists():
+            results[rec.id] = f"no cleaned stem at {wav}"
+            continue
+        out = batch_dir / f"{rec.id}.json"
+        jobs.append({"wav": str(wav), "out": str(out)})
+        by_out[rec.id] = out
+    jobs_path = batch_dir / "jobs.json"
+    jobs_path.write_text(json.dumps(jobs, indent=1), encoding="utf-8")
+    if jobs:
+        argv = [part.format(jobs=str(jobs_path)) for part in cfg.command]
+        runner(argv, cfg.command_cwd, cfg.timeout_sec)
+    for rid, out in by_out.items():
+        if not out.exists():
+            results[rid] = "backend wrote no result"
+            continue
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        results[rid] = payload["error"] if "error" in payload else payload
+    return results
+
+
 def run(
     data_root: str | Path,
     *,
@@ -141,40 +181,13 @@ def run(
         work = work[:limit]
     if not work:
         return summary
-    if not cfg.command:
-        raise RuntimeError(
-            "no lyrics command configured - copy configs/lyrics.yaml to "
-            "configs/lyrics.local.yaml and point `command` at the whisper venv + "
-            "scripts/whisper_lyrics.py")
-
-    stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    batch_dir = data_root / "work" / f"lyrics_{stamp}"
-    batch_dir.mkdir(parents=True, exist_ok=True)
-    jobs, by_out = [], {}
-    for rec in work:
-        wav = song_dir(data_root, rec.id) / "clean" / f"{cfg.stem}.wav"
-        if not wav.exists():
-            summary.failed[rec.id] = f"no cleaned stem at {wav}"
-            continue
-        out = batch_dir / f"{rec.id}.json"
-        jobs.append({"wav": str(wav), "out": str(out)})
-        by_out[rec.id] = out
-    jobs_path = batch_dir / "jobs.json"
-    jobs_path.write_text(json.dumps(jobs, indent=1), encoding="utf-8")
-    if jobs:
-        argv = [part.format(jobs=str(jobs_path)) for part in cfg.command]
-        runner(argv, cfg.command_cwd, cfg.timeout_sec)
+    results = transcribe_batch(data_root, work, cfg, runner)
 
     for rec in work:
-        out = by_out.get(rec.id)
-        if out is None:
-            continue
         try:
-            if not out.exists():
-                raise RuntimeError("backend wrote no result")
-            payload = json.loads(out.read_text(encoding="utf-8"))
-            if "error" in payload:
-                raise RuntimeError(payload["error"])
+            payload = results[rec.id]
+            if isinstance(payload, str):
+                raise RuntimeError(payload)
             segments = payload.get("segments", [])
             stats = lyrics_stats(segments)
             if stats["n_words"] < cfg.min_words:

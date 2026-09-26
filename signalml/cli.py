@@ -639,6 +639,21 @@ def _cmd_lyrics(args: argparse.Namespace) -> int:
     from .manifest import resolve_data_root
     from .stages.lyrics import load_lyrics_config, run
 
+    if args.check:
+        from .stages.lyrics_check import run_check
+
+        s = run_check(resolve_data_root(args.data_root), cfg=load_lyrics_config(args.config),
+                      prefix=args.prefix, ids=args.ids or None, force=args.force,
+                      report=args.report)
+        look = sum(1 for r in s.checked.values() if r.flags)
+        print(f"lyrics --check: {len(s.checked)} checked, {look} to look at, "
+              f"{len(s.checked) - look} clean, {len(s.failed)} failed")
+        if s.report:
+            print(f"review: {s.report}")
+        for rid, why in sorted(s.failed.items()):
+            print(f"  FAILED {rid}: {why}", file=sys.stderr)
+        return 1 if s.failed and not s.checked else 0
+
     summary = run(
         resolve_data_root(args.data_root),
         cfg=load_lyrics_config(args.config),
@@ -1377,6 +1392,13 @@ def main(argv: list[str] | None = None) -> int:
     ly_p.add_argument("--limit", type=int, default=None, help="stop after this many songs")
     ly_p.add_argument("--ids", nargs="*", default=None,
                       help="explicit song ids instead of a manifest query")
+    ly_p.add_argument("--check", action="store_true",
+                      help="compare HUMAN lyrics with what is sung and write a review file "
+                           "of departures (repeats, ad-libs, skipped lines); lyrics untouched")
+    ly_p.add_argument("--prefix", default=None,
+                      help="--check: only songs under this DATA_ROOT path, e.g. RAW/<batch>")
+    ly_p.add_argument("--report", default=None,
+                      help="--check: review file path (default DATA_ROOT/review/...)")
     ly_p.set_defaults(func=_cmd_lyrics)
 
     # transcribe — S5b note labels (D1)

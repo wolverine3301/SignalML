@@ -69,7 +69,10 @@ def main() -> int:
                 "segments": [{"start": round(s.start, 3), "end": round(s.end, 3),
                               "text": s.text.strip(), "avg_logprob": round(s.avg_logprob, 4),
                               "compression_ratio": round(s.compression_ratio, 3),
-                              "no_speech_prob": round(s.no_speech_prob, 4)} for s in segs],
+                              "no_speech_prob": round(s.no_speech_prob, 4),
+                              "words": [{"w": w.word.strip(), "start": round(w.start, 3),
+                                         "end": round(w.end, 3)} for w in (s.words or [])]}
+                             for s in segs],
             }
         except Exception as exc:  # noqa: BLE001 - reported per song, batch continues
             failures += 1
