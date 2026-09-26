@@ -1,7 +1,8 @@
 # Phrase-by-phrase alignment (2026-09-26)
 
-**Status:** planner done (`signalml/stages/align_chunks.py`, tests in
-`tests/test_align_chunks.py`); wiring into `signalml align` is next.
+**Status (2026-09-26):** wired in. `signalml align --phrases` plans phrase
+utterances from `lyrics/asr.json`; `--variant NAME` writes `phones.NAME.json` beside
+the canonical alignment for A/B runs. See "The full preprocessing chain" below.
 
 ## The problem: whole-song MFA fails silently
 
@@ -108,3 +109,57 @@ To A/B two *models* by ear rather than two alignments, use the same method:
 - put the same held-out clips in the same rows on two pages;
 - give both models the same variance output (pitch curve and durations) and one fixed
   seed, so the only difference is the model under test.
+
+## The full preprocessing chain (2026-09-26)
+
+```
+signalml lyrics --check                      # Whisper words -> lyrics/asr.json
+signalml lyrics --resolve                    # pasted lyrics vs what is sung -> lyrics/resolved.txt
+signalml align --phrases --variant phrase    # phrase MFA (+ G2P with g2p_model set)
+signalml dataset build --recipe configs/dataset.full_v3.yaml   # alignment_variant + phrase_gate
+```
+
+**Resolve** (`signalml/stages/lyrics_resolve.py`) decides what official lyrics get
+wrong against a cover, from the same word alignment as `lyrics --check`:
+
+- a `(parenthesised)` group is kept when Whisper heard it, dropped when nothing was
+  sung there, marked *unsure* when something else was. MFA used to turn every `(...)`
+  into one ~30 ms `[bracketed]` spn, smearing a sung echo over its neighbours;
+- `[Chorus]` headers and `(x2)` instructions go;
+- a run of whole unheard lines is dropped only when it cannot have been sung: less
+  than 0.3 s per word between the heard neighbours, or a mostly silent vocal stem
+  there. Whisper skips sung lines (often a chorus repeat); those are kept as unsure;
+- the text MFA reads is normalised (typographic quotes and dashes, stutter hyphens,
+  `&`, small numbers), and `import-batch` songs are resolved from
+  `lyrics.source.txt`, the only copy that still has the parentheses.
+
+The human lyrics file is never modified.
+
+**G2P for out-of-dictionary words** (`g2p_model` in the align config): every OOV
+word of a run is spelled by MFA's G2P model and aligned against dictionary + those
+words. OOV words used to align as spn, and a clip with spn is dropped.
+
+**Unlyricked singing** (an ad-lib, a repeat the text lacks, a line resolve dropped) is
+left out of both neighbouring utterances when there are real dips around it, instead of
+being forced onto neighbouring words.
+
+**Phrase gate** (`phrase_gate` in a recipe) removes a phrase's phones, and keeps clips
+from padding into its audio, when its alignment failed: >= 70% of phones at the 30 ms
+floor, a run of >= 8 floor phones, a phone > 5 s, or a line resolve marked unsure.
+
+### How well resolve repairs lyrics: `scripts/resolve_plant_eval.py`
+
+Plants one departure into hand-corrected lyrics and resolves against the real Whisper
+transcript (2026-09-26):
+
+| planted | resolve's decision |
+|---|---|
+| `(echo)` never sung | dropped 92.3%, unsure 4.2%, kept 3.6% |
+| `(echo)` sung | kept 94.9%, unsure 2.8%, dropped 2.4% |
+| clean lyrics | unchanged in 91% of songs |
+| 2-4 lines from another song | fully removed in 54%; damage elsewhere 4% |
+
+Tested and **not** enabled: re-inserting a repeated line the text omits (restores 48%
+of omitted repeats but doubles damage to clean lyrics, 9% -> 18%), and replacing a text
+word with a confidently heard one (fixes 6% of swapped words, damages 89% of clean
+lyrics - Whisper mishears sung words far more often than covers change them).
