@@ -178,3 +178,42 @@ def test_import_batch_songs_resolve_from_the_pasted_source(tmp_path, make_wav):
     assert "note" not in res.text.lower()                       # the cut note never is
     meta = json.loads((sdir / "lyrics" / "resolve.json").read_text(encoding="utf-8"))
     assert meta["source"].endswith("lyrics.source.txt")
+
+
+def _gapped(*parts):
+    """Segments with explicit start times: (start, line)."""
+    return [{"start": t, "end": t + 0.5 * len(ln.split()), "text": ln,
+             "words": [{"w": w, "start": t + 0.5 * i, "end": t + 0.5 * i + 0.4}
+                       for i, w in enumerate(ln.split())]} for t, ln in parts]
+
+
+MISSED = "these words were sung but whisper never heard them"
+
+
+def test_unheard_line_with_room_to_be_sung_is_kept_unsure():
+    # Whisper skipped a sung line: its neighbours are 8 s apart
+    text = "\n".join([VERSE[0], MISSED, VERSE[1]])
+    segs = _gapped((0.0, VERSE[0]), (12.0, VERSE[1]))
+    res = resolve(text, segs)
+    assert MISSED in res.text.splitlines()
+    assert res.unsure_lines == [1]
+
+
+def test_unheard_line_over_silent_vocal_is_dropped():
+    text = "\n".join([VERSE[0], MISSED, VERSE[1]])
+    segs = _gapped((0.0, VERSE[0]), (12.0, VERSE[1]))
+    res = resolve(text, segs, voiced=lambda t0, t1: 0.05)   # an instrumental break
+    assert MISSED not in res.text.splitlines() and res.unsure_lines == []
+    sung = resolve(text, segs, voiced=lambda t0, t1: 0.9)  # singing there
+    assert MISSED in sung.text.splitlines() and sung.unsure_lines == [1]
+
+
+def test_voiced_fraction_reads_the_vocal():
+    import numpy as np
+
+    from signalml.stages.lyrics_resolve import voiced_fraction
+
+    sr = 1000
+    y = np.concatenate([0.5 * np.ones(2 * sr), 1e-4 * np.ones(2 * sr)]).astype(np.float32)
+    f = voiced_fraction(y, sr)
+    assert f(0.0, 1.9) > 0.9 and f(2.1, 4.0) < 0.1

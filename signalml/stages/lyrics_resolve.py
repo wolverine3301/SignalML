@@ -31,10 +31,14 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
+
 from ..manifest import Manifest, ManifestRecord
+from .align_chunks import HOP_SEC, frame_level_db, timed_words
 from .common import song_dir, update_analysis
 from .lyrics import ASR_NAME, ASR_PREFIX
 from .lyrics_check import MIN_MISSING, norm_words
@@ -42,7 +46,7 @@ from .lyrics_check import MIN_MISSING, norm_words
 RESOLVED_NAME = "resolved.txt"
 RESOLVE_JSON = "resolve.json"
 SOURCE_NAME = "lyrics.source.txt"  # what import-batch keeps of the pasted lyrics
-RESOLVE_VERSION = 2  # 2: aligner spelling (normalize_for_alignment), pasted source
+RESOLVE_VERSION = 3  # 2: aligner spelling, pasted source; 3: unheard-line evidence
 
 # A parenthesised group counts as sung when at least this share of its words matched.
 HEARD_FRAC = 0.5
@@ -52,6 +56,10 @@ MIN_SONG_AGREEMENT = 0.4
 # A line this badly matched, with at least this many words, is marked unsure.
 UNSURE_LINE_FRAC = 0.25
 UNSURE_LINE_WORDS = 3
+# A run of unheard lines is dropped only when it cannot have been sung: less than this
+# much time per word between the heard neighbours, or a mostly silent vocal there.
+SEC_PER_WORD = 0.3
+MAX_VOICED_FRAC = 0.25
 
 # Edit costs, doubled so a parenthesised word's deletion can cost half: when the text
 # says "I know (I know)" and one "I know" is sung, the echo is the one to call unsung.
@@ -191,15 +199,7 @@ def _align_weighted(ref: list[str], del_cost: list[int], hyp: list[str]
 
 
 def heard_words(segments: list[dict]) -> list[str]:
-    out: list[str] = []
-    for seg in segments:
-        words = seg.get("words") or []
-        if words:
-            for w in words:
-                out += norm_words(w["w"])
-        else:
-            out += norm_words(seg.get("text", ""))
-    return out
+    return [w for w, _, _ in timed_words(segments)]
 
 
 @dataclass
@@ -219,7 +219,11 @@ class Resolution:
         return c
 
 
-def resolve(text: str, segments: list[dict]) -> Resolution:
+def resolve(text: str, segments: list[dict],
+            voiced: Callable[[float, float], float] | None = None) -> Resolution:
+    """``voiced(t0, t1)``: share of that stretch of the vocal stem with singing in it
+    (``voiced_fraction``); without it, whether a run of lines was sung is judged from
+    Whisper's timing alone."""
     lines, groups = _parse(text)
     ref: list[str] = []
     dcost: list[int] = []
@@ -230,19 +234,20 @@ def resolve(text: str, segments: list[dict]) -> Resolution:
                 ref.append(w)
                 dcost.append(_DEL if p.group is None else _DEL_PAREN)
                 owner.append((li, p.group))
-    hyp = heard_words(segments)
+    heard = timed_words(segments)
+    hyp = [w for w, _, _ in heard]
     ops = _align_weighted(ref, dcost, hyp)
 
     status = ["del"] * len(ref)
     run_of = [-1] * len(ref)  # index of the non-matching run a word sits in
     runs: list[dict] = []
     cur: dict | None = None
-    for op, i, _j in ops:
+    for op, i, j in ops:
         if op == "=":
             status[i], cur = "=", None
             continue
         if cur is None:
-            cur = {"ref": [], "hyp": 0}
+            cur = {"ref": [], "hyp": 0, "j": j}  # j: next heard word when it starts
             runs.append(cur)
         if op in ("sub", "del"):
             status[i] = op
@@ -274,8 +279,23 @@ def resolve(text: str, segments: list[dict]) -> Resolution:
         else:
             g["decision"] = "drop"
 
-    # whole lines nobody sang: every main word deleted in runs with nothing sung
+    # whole lines nobody sang: every main word deleted in runs with nothing heard, and
+    # no room for them either - Whisper skips sung lines (often a chorus repeat), and
+    # those still take seconds of singing between the heard neighbours
+    def room(r: dict) -> tuple[float, float]:
+        t0 = heard[r["j"] - 1][2] if r["j"] > 0 else 0.0
+        t1 = heard[r["j"]][1] if r["j"] < len(heard) else float("inf")
+        return t0, t1
+
+    def not_sung(r: dict) -> bool:
+        t0, t1 = room(r)
+        if t1 - t0 < SEC_PER_WORD * len(r["ref"]):
+            return True  # no time to have sung them
+        return voiced is not None and voiced(t0, t1) < MAX_VOICED_FRAC
+
     silent_run = [not r["hyp"] and len(r["ref"]) >= MIN_MISSING for r in runs]
+    unheard_run = [silent_run[k] and not not_sung(r) for k, r in enumerate(runs)]
+    silent_run = [silent_run[k] and not unheard_run[k] for k in range(len(runs))]
     out_lines: list[str] = []
     unsure: list[int] = []
     line_log: list[dict] = []
@@ -289,6 +309,9 @@ def resolve(text: str, segments: list[dict]) -> Resolution:
             line_log.append({"text": ln.text, "status": "dropped_unheard"})
             continue
         parts, line_unsure = [], not trust
+        # unheard but there was singing where it goes: keep it, don't vouch for it
+        line_unsure |= bool(main) and all(status[i] == "del" and unheard_run[run_of[i]]
+                                          for i in main)
         for p in ln.pieces:
             if p.group is not None:
                 dec = groups[p.group]["decision"]
@@ -319,6 +342,33 @@ def human_lyrics_source(lyrics_path: Path) -> Path:
     only the pasted text still says which words were in parentheses."""
     source = lyrics_path.with_name(SOURCE_NAME)
     return source if lyrics_path.name == "lyrics.txt" and source.exists() else lyrics_path
+
+
+VOICED_BELOW_LOUD_DB = 20.0  # a frame is sung within this far of the song's loud level
+
+
+def voiced_fraction(y: np.ndarray, sr: int) -> Callable[[float, float], float]:
+    """``(t0, t1) -> share of frames with singing``, for ``resolve``. Relative to the
+    song's own loud level (90th percentile) - separated vocals carry reverb and bleed
+    far above any absolute silence threshold (docs/notes/chunked_alignment.md)."""
+    level = frame_level_db(y, sr, hop_sec=HOP_SEC)
+    on = level > np.percentile(level, 90) - VOICED_BELOW_LOUD_DB
+
+    def frac(t0: float, t1: float) -> float:
+        a = max(0, int(t0 / HOP_SEC))
+        b = min(len(on), int(min(t1, len(on) * HOP_SEC) / HOP_SEC))
+        return float(on[a:b].mean()) if b > a else 0.0
+    return frac
+
+
+def _song_voiced(sdir: Path) -> Callable[[float, float], float] | None:
+    import soundfile as sf
+
+    wav = sdir / "clean" / "vocals.wav"
+    if not wav.exists():
+        return None
+    y, sr = sf.read(str(wav), dtype="float32", always_2d=True)
+    return voiced_fraction(y.mean(axis=1), sr)
 
 
 def load_resolution(sdir: Path) -> tuple[str, list[int]] | None:
@@ -372,7 +422,7 @@ def run_resolve(data_root: str | Path, *, ids: list[str] | None = None,
                 from ..ingest.batch import cut_note
 
                 text = cut_note(text)[0]
-            res = resolve(text, asr.get("segments", []))
+            res = resolve(text, asr.get("segments", []), voiced=_song_voiced(sdir))
             (sdir / "lyrics" / RESOLVED_NAME).write_text(res.text + "\n", encoding="utf-8")
             (sdir / "lyrics" / RESOLVE_JSON).write_text(json.dumps({
                 "version": RESOLVE_VERSION,
