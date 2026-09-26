@@ -140,3 +140,23 @@ def diff_against_mfa_dictionary(phone_set: PhoneSet, dict_path: str | Path) -> P
         missing_from_set=sorted(dict_phones - phone_set.phones - SILENCE_MARKS - NOISE_MARKS),
         unused_by_dict=sorted(phone_set.phones - dict_phones),
     )
+
+
+# Consonant allophones in mfa_ipa/en_v1 folded into their base phoneme. The general
+# english_mfa dictionary spans many dialects, and on sung English it spreads one
+# consonant over several tokens per word (measured 2026-09-25: 38% of /t/
+# landed on t_retroflex/t_dental/t_palatalized/..., 37% of /l/ on dark or palatal l,
+# /w/ almost entirely on the labiodental approximant), so each is learned from a
+# fraction of the data. Vowels are left alone: accent is part of a singer's sound.
+# Syllabic consonants (m, n, l with the syllabic mark) stay: they are nuclei.
+CONSONANT_CORE_EN_V1: dict[str, str] = {
+    **{ph: "t" for ph in ("tʰ", "tʲ", "tʷ", "ʈ", "ʈʲ", "t̪", "ɾ")},
+    **{ph: "d" for ph in ("dʲ", "d̪", "ɖ")},
+    **{ph: "k" for ph in ("kʰ", "kʷ", "c", "cʰ", "cʷ")},
+    **{ph: "ɡ" for ph in ("ɡʷ", "ɟ", "ɟʷ")},
+    **{ph: "p" for ph in ("pʰ", "pʲ")},
+    "bʲ": "b", "fʲ": "f", "vʲ": "v", "mʲ": "m", "ɲ": "n",
+    "ɫ": "l", "ʎ": "l", "ʋ": "w",
+}
+PHONE_MERGES: dict[str, dict[str, str]] = {"none": {}, "consonant_core": CONSONANT_CORE_EN_V1}
+

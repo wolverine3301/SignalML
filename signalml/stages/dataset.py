@@ -87,6 +87,10 @@ class SegmentationCfg(BaseModel):
     # lands on its vowel and the onset consonant is sung ahead of the beat. `word` is
     # the original (2026-09-22) division, kept so existing datasets rebuild identically.
     ph_num_mode: Literal["word", "vowel_onset"] = "word"
+    # Fold phoneme variants before they reach the trainer (score/phoneset.PHONE_MERGES).
+    # consonant_core: dialect allophones of each consonant -> its base phoneme. The
+    # same map must be applied to scores at inference (score to-ds --phone-merge).
+    phone_merge: Literal["none", "consonant_core"] = "none"
 
 
 # The mel/audio contract is owned end-to-end by the active audio profile (D5,
@@ -235,6 +239,9 @@ def segment_phones(
     current phone boundary as a last resort. Returns (clips, dropped_count) where
     dropped covers too-short and (optionally) noise-containing clips.
     """
+    from ..score.phoneset import PHONE_MERGES
+
+    merge = PHONE_MERGES[cfg.phone_merge]
     clips: list[Clip] = []
     dropped = 0
     group: list[dict] = []
@@ -278,7 +285,7 @@ def segment_phones(
                 prev_word = None  # a silence always closes the previous word
                 cursor = p["start"]
             ph_end = max(p["end"], cursor)  # tiny gaps merge into this phone
-            tokens.append(p["ph"])
+            tokens.append(merge.get(p["ph"], p["ph"]))
             durations.append(ph_end - cursor)
             word = p.get("word")
             if word is not None and word == prev_word:

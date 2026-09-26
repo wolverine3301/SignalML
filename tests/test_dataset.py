@@ -100,6 +100,18 @@ class TestSegmentPhones:
         clips, dropped = segment_phones(phones, SEG, audio_len_sec=4.0)
         assert clips == [] and dropped == 1
 
+    def test_consonant_core_merge(self):
+        phones = [{"ph": "ʈ", "start": 1.0, "end": 1.3, "word": "tell"},
+                  {"ph": "ɛ", "start": 1.3, "end": 2.0, "word": "tell"},
+                  {"ph": "ʋ", "start": 2.0, "end": 2.4, "word": "way"},
+                  {"ph": "ej", "start": 2.4, "end": 3.5, "word": "way"}]
+        (plain,), _ = segment_phones(phones, SEG, audio_len_sec=4.0)
+        assert "ʈ" in plain.tokens and "ʋ" in plain.tokens
+        merged_cfg = SEG.model_copy(update={"phone_merge": "consonant_core"})
+        (merged,), _ = segment_phones(phones, merged_cfg, audio_len_sec=4.0)
+        assert [t for t in merged.tokens if t != SP] == ["t", "ɛ", "w", "ej"]
+        assert merged.durations == plain.durations  # timing is untouched
+
     def test_too_short_dropped(self):
         phones = [{"ph": "aj", "start": 1.0, "end": 1.2}]
         clips, dropped = segment_phones(phones, SEG, audio_len_sec=4.0)
