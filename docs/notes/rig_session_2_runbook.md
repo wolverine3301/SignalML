@@ -86,7 +86,7 @@ signalml align
 signalml manifest report
 ```
 
-**Machine lyrics are not trustworthy for timing yet** (measured overnight on 15 songs
+**Machine lyrics are not trustworthy for timing yet** (measured overnight on songs
 with hand-corrected lyrics): Whisper finds ~90% of the words (median word error ~19%),
 but MFA alignments made from its lyrics agree with the hand-lyrics alignments on only
 **~58% of sung time** (control: re-aligning the hand lyrics reproduces 99.8%, so the

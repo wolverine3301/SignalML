@@ -1,7 +1,7 @@
 # P7.5 overfit sanity run - the first thing the 5090 rig trains.
 #
-# Purpose is to validate the *data path*, not to make a good model: three singers
-# with the most clipped audio (~1.8 h), trained until it resings a training snippet
+# Purpose is to validate the *data path*, not to make a good model: a few singers
+# with the most clipped audio, trained until it resings a training snippet
 # recognizably. It is also the D3 smoke test - if the vendored binarizer chokes on
 # IPA phoneme names, it chokes here, on a build that takes minutes to redo.
 #

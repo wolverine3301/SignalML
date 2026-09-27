@@ -9,7 +9,7 @@ Motivating cases from the 2026-09 corpus run:
 - The July `align` run died mid-step and left **nothing** — no partial timings, no
   indication of which song it was on. A run record written incrementally would have
   said exactly where it stopped.
-- The 2026-09-08 align took ~4 h for 21.4 h of audio. Nobody could say whether that
+- The 2026-09-08 align took ~4 h for the corpus. Nobody could say whether that
   was reasonable until it was over, because there was no throughput baseline.
 - 57% of utterances hit MFA's retry beam, which is the single biggest cost driver in
   that stage, and it was only visible by grepping MFA's own debug logs.

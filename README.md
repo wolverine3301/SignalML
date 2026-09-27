@@ -157,7 +157,7 @@ Shipping refuses a dirty worktree, so checkpoint git hashes stay honest. The
 
 ```powershell
 # 1. build the dataset ON the rig, so its config carries rig-local paths
-signalml dataset build --recipe configs/dataset.overfit.yaml   # 3 singers, ~1.8 h
+signalml dataset build --recipe configs/dataset.overfit.yaml   # a small multi-singer set
 # 2. the vocoder used for validation playback (CC BY-NC, dev preview only - Q4)
 powershell -ExecutionPolicy Bypass -File .\scripts\fetch_dev_vocoder.ps1
 # 3. preflight, then binarize + train with a run record

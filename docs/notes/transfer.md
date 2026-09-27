@@ -7,11 +7,11 @@ can actually run what arrived.
 
 ## Why a tool and not `robocopy`
 
-Throughput is not the problem. Over 1 GbE (~110 MB/s real) a 35 GB haul is about six
+Throughput is not the problem. Over 1 GbE (~110 MB/s real) a haul of tens of GB takes
 minutes; `robocopy /MIR /MT:16 /Z` moves those bytes fine. Three things it cannot do,
 and all three are why this exists:
 
-1. **Know what to send.** Of ~74 GB in a populated `DATA_ROOT`, the rig needs roughly
+1. **Know what to send.** Of a populated `DATA_ROOT`, the rig needs roughly
    half: `clean/vocals.wav` and `align/`, not the non-vocal Demucs stems, not the
    pre-clean `stems/vocals.wav`, not the re-downloadable source corpora. Selection is a
    manifest question, and the manifest is what `dataset build` already answers it with.
@@ -35,7 +35,7 @@ The plan (`DATA_ROOT/ship/<name>/SHIP.json`) lists every file with its destinati
 relative path, size and sha256, plus git provenance and the song ids selected. Nothing
 is copied at plan time — only generated files (the manifest subset, the bundle) are
 staged. Re-planning is cheap: a `(size, mtime_ns) -> sha256` cache under
-`DATA_ROOT/ship/hashcache.json` means a second plan over 35 GB does no rehashing.
+`DATA_ROOT/ship/hashcache.json` means a second plan over tens of GB does no rehashing.
 
 The transport is a stdlib HTTP server. One port, one firewall rule, no dependency, and
 it works unchanged if the receiver later becomes a Linux box or a cloud instance.

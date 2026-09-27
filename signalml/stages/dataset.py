@@ -879,7 +879,7 @@ def write_variance_config(
     """Generate a variance trainer config beside an existing acoustic dataset.
 
     A variance dataset *is* the acoustic dataset - same wavs, same transcriptions.csv,
-    extra columns - so this writes a config rather than copying 4 GB of audio
+    extra columns - so this writes a config rather than copying gigabytes of audio
     (their BestPractices: "extend an acoustic dataset"). The binarized output must
     still go somewhere of its own: different binarizer, different tensors.
 

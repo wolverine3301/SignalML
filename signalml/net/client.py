@@ -52,7 +52,7 @@ class PullSummary:
 
 
 class Receipts:
-    """path -> sha256 of what we last landed, so a re-run does not re-hash 35 GB."""
+    """path -> sha256 of what we last landed, so a re-run does not re-hash tens of GB."""
 
     def __init__(self, path: Path):
         self.path = path
