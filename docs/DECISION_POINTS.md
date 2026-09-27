@@ -151,7 +151,7 @@ spec (probably: adopt the vocoder's exactly), then add golden-file round-trip te
 ## D6. 🟠 Vocoder training recipe (decided *that* we train our own; not *how*)
 
 **What must be decided:** architecture variant (NSF-HiFiGAN vs PC-NSF-HiFiGAN vs
-BigVGAN-class), training config for ~90 h (78 EN + 12 GA/GD) on one 5090, seeding
+BigVGAN-class), training config for the full private corpus (EN + GA/GD) on one 5090, seeding
 strategy (from-scratch vs architecture-only init), fine-tune cadence, and acceptance
 bar (copy-synthesis ABX vs the NC community checkpoint — must be ≥ before it ships).
 **Current lean:** PC-NSF-HiFiGAN-style from the vendored stack at prod profile.

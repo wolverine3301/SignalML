@@ -24,8 +24,8 @@ log files and no process). Use `Invoke-CimMethod Win32_Process Create` pointing 
 
 ## The run
 
-`overfit_v1` — 3 singers, prod profile. Rebuilt on the rig from a
-`rebuildable` shipment (0.77 GB, 49 songs, hash-verified) and it produced *exactly* the
+`overfit_v1` — prod profile. Rebuilt on the rig from a
+`rebuildable` shipment (hash-verified) and it produced *exactly* the
 clip count built on the work PC, which is the dataset-purity claim actually holding
 across two machines.
 

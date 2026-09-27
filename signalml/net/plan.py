@@ -122,7 +122,7 @@ class ShipPlan(BaseModel):
 
 
 class HashCache:
-    """(size, mtime_ns) -> sha256, so re-planning a 35 GB corpus is instant.
+    """(size, mtime_ns) -> sha256, so re-planning a corpus of tens of GB is instant.
 
     Cheap but honest: fooling it needs a rewrite with an identical size *and* mtime,
     and every pipeline stage writes through a temp + ``os.replace``.
