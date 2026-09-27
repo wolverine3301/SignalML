@@ -310,6 +310,51 @@ def _cmd_manifest_import_medleydb(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_manifest_import_gtsinger(args: argparse.Namespace) -> int:
+    from .ingest.gtsinger import import_gtsinger
+    from .manifest import resolve_data_root
+
+    genders = [g.strip() for g in args.genders.split(",") if g.strip()]
+    manifest, new_records, skipped, groups = import_gtsinger(
+        resolve_data_root(args.data_root), root=args.path, genders=genders,
+        limit=args.limit, dry_run=args.dry_run)
+    singers = sorted({g.singer for g in groups})
+    print(f"{len(groups)} take(s) from {len(singers)} singer(s) {singers}")
+    for label, reason in sorted(skipped.items()):
+        if "checksum" not in reason and "spoken reading" not in reason:
+            print(f"  SKIPPED {label}: {reason}", file=sys.stderr)
+    if args.dry_run:
+        print(f"import-gtsinger (dry run): {len(groups)} take(s) would be imported")
+        return 0
+    manifest.save()
+    failed = sum(1 for r in skipped.values() if r.startswith("failed"))
+    print(f"import-gtsinger: {len(new_records)} imported, {failed} failed, "
+          f"{len(manifest)} records total")
+    if new_records:
+        print("next: signalml clean --profile prod (aligned already: manual TextGrids). "
+              "Licence CC BY-NC-SA 4.0 - non-commercial.")
+    return 1 if failed and not new_records else 0
+
+
+def _cmd_manifest_import_csd(args: argparse.Namespace) -> int:
+    from .ingest.csd import import_csd
+    from .manifest import resolve_data_root
+
+    manifest, new_records, skipped = import_csd(
+        resolve_data_root(args.data_root), root=args.path, language=args.language,
+        limit=args.limit)
+    for stem, reason in sorted(skipped.items()):
+        if "checksum" not in reason:
+            print(f"  SKIPPED {stem}: {reason}", file=sys.stderr)
+    manifest.save()
+    print(f"import-csd: {len(new_records)} imported, {len(skipped)} skipped, "
+          f"{len(manifest)} records total")
+    if new_records:
+        print("next: signalml clean --profile prod, Whisper (asr.json), lyrics --resolve, "
+              "align --phrases. Licence CC BY-NC-SA 4.0 - non-commercial.")
+    return 0
+
+
 def _cmd_manifest_import_vocalset(args: argparse.Namespace) -> int:
     from .ingest.vocalset import import_vocalset, summarize
     from .manifest import resolve_data_root
@@ -1157,6 +1202,36 @@ def main(argv: list[str] | None = None) -> int:
     vs_p.add_argument("--dry-run", action="store_true",
                       help="report the census; copy and write nothing")
     vs_p.set_defaults(func=_cmd_manifest_import_vocalset)
+
+    gts_p = manifest_sub.add_parser(
+        "import-gtsinger",
+        help="onboard GTSinger's English singing takes with their manual phoneme "
+             "alignments (CC BY-NC-SA 4.0)")
+    gts_p.add_argument("--data-root", default=None,
+                       help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    gts_p.add_argument("--path", required=True,
+                       help="downloaded GTSinger folder (holds English/<singer>/...)")
+    gts_p.add_argument("--genders", default="F",
+                       help="comma list F,M - from the voice part in the singer folder "
+                            "(Alto/Soprano = F, Tenor/Bass = M; default: F)")
+    gts_p.add_argument("--limit", type=int, default=None,
+                       help="import at most N takes (smoke tests)")
+    gts_p.add_argument("--dry-run", action="store_true",
+                       help="report the takes found; write nothing")
+    gts_p.set_defaults(func=_cmd_manifest_import_gtsinger)
+
+    csd_p = manifest_sub.add_parser(
+        "import-csd",
+        help="onboard CSD (Children's Song Dataset) a cappella songs with their lyrics "
+             "(CC BY-NC-SA 4.0)")
+    csd_p.add_argument("--data-root", default=None,
+                       help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    csd_p.add_argument("--path", required=True,
+                       help="extracted CSD folder (holds english/{wav,lyric}/)")
+    csd_p.add_argument("--language", default="english", help="english (default) or korean")
+    csd_p.add_argument("--limit", type=int, default=None,
+                       help="import at most N recordings (smoke tests)")
+    csd_p.set_defaults(func=_cmd_manifest_import_csd)
     corpus_p = manifest_sub.add_parser(
         "set-corpus", help="backfill meta.corpus on existing records"
     )
