@@ -1,5 +1,12 @@
 # Candidate corpora — survey (2026-09-18)
 
+**Update 2026-09-26:** GTSinger's English female singers (EN-Alto-1/2; singing takes
+only) and CSD's English half are onboarded - `signalml manifest import-gtsinger` (its
+manual TextGrid alignments are converted to `phones.json`, no MFA) and `signalml
+manifest import-csd` (normal Whisper -> resolve -> phrase-alignment path). Both are
+CC BY-NC-SA: tagged `gtsinger` / `csd`, so `exclude_corpora` keeps them out of anything
+that ships. They joined `full_v3`, a development run.
+
 A survey of external corpora *not yet onboarded*, written against the three gaps the
 current collection has. Nothing here is downloaded or wired up; this is the shortlist and
 the reasoning, so the decision is not re-derived later.

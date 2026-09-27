@@ -11,6 +11,10 @@
 # "align.phrase"): lower than whole-song coverage by design, since audio no lyric
 # accounts for is left unaligned rather than smeared over neighbouring words.
 #
+# Corpora: all of them (`corpora: []`), which now includes the non-commercial GTSinger
+# (English altos, manual alignments) and CSD (English) - a development run; add
+# `exclude_corpora: [gtsinger, csd]` for anything that has to ship.
+#
 # Private overlay: configs/dataset.full_v3.local.yaml (gitignored) - exclude_singers.
 #
 #   signalml dataset build --recipe configs/dataset.full_v3.yaml
