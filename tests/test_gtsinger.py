@@ -88,3 +88,14 @@ def test_import_is_idempotent(corpus, tmp_path):
     manifest.save()
     manifest, again, skipped, _ = import_gtsinger(root, root=corpus)
     assert again == [] and sum("checksum" in r for r in skipped.values()) == 2
+
+
+def test_textgrids_named_without_extension_are_found(tmp_path, make_wav):
+    root = tmp_path / "GTSinger"
+    gdir = root / "English" / "EN-Alto-2" / "Vibrato" / "kestrel" / "Vibrato_Group"
+    _phrase(gdir / "0000", make_wav)
+    (gdir / "0000.TextGrid").rename(gdir / "0000_TextGrid")   # the corpus' other spelling
+    groups, _ = find_groups(root)
+    assert len(groups) == 1 and groups[0].segments == [gdir / "0000.wav"]
+    manifest, new, skipped, _ = import_gtsinger(tmp_path / "dr", root=root)
+    assert len(new) == 1 and not skipped

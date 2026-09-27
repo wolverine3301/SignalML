@@ -91,6 +91,15 @@ def gender_of(singer: str) -> str | None:
     return None
 
 
+def textgrid_for(wav: Path) -> Path | None:
+    """The phrase's TextGrid: ``0000.TextGrid``, or ``0000_TextGrid`` (no extension) as
+    about 40% of the English folders name it."""
+    for tg in (wav.with_suffix(".TextGrid"), wav.with_name(f"{wav.stem}_TextGrid")):
+        if tg.exists():
+            return tg
+    return None
+
+
 def textgrid_phones(path: Path, offset: float = 0.0) -> tuple[list[dict], list[str]]:
     """(phones.json entries, words) of one phrase TextGrid, shifted by ``offset``."""
     from praatio import textgrid as praatio_tg
@@ -150,7 +159,7 @@ def find_groups(root: str | Path, *, language: str = "English",
             if group == _SPEECH_GROUP:
                 skipped[item.label] = "spoken reading of the lyrics, not singing"
                 continue
-            wavs = sorted((w for w in gdir.glob("*.wav") if w.with_suffix(".TextGrid").exists()),
+            wavs = sorted((w for w in gdir.glob("*.wav") if textgrid_for(w)),
                           key=lambda w: (len(w.stem), w.stem))
             if not wavs:
                 skipped[item.label] = "no phrase WAV with a TextGrid"
@@ -207,7 +216,7 @@ def import_gtsinger(
             lines: list[str] = []
             audio, sr, offsets = _join(g.segments)
             for seg, off in zip(g.segments, offsets):
-                ph, words = textgrid_phones(seg.with_suffix(".TextGrid"), off)
+                ph, words = textgrid_phones(textgrid_for(seg), off)
                 phones += ph
                 if ph and words:
                     lines.append(" ".join(words))
