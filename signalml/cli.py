@@ -355,6 +355,35 @@ def _cmd_manifest_import_csd(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_manifest_import_multitrack(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from .ingest.multitrack import import_multitrack
+    from .manifest import resolve_data_root
+
+    batch = args.batch or Path(args.path).name
+    manifest, new_records, report = import_multitrack(
+        resolve_data_root(args.data_root), root=args.path, batch=batch,
+        dry_run=args.dry_run)
+    for folder, reason in report["folders_skipped"].items():
+        print(f"  SKIPPED folder {folder}: {reason}", file=sys.stderr)
+    print(f"import-multitrack{' (dry run)' if args.dry_run else ''}: "
+          f"{report['kept_tracks']} vocal track(s) kept of {report['folders']} folder(s)")
+    for role, hours in report["kept_sung_hours_by_role"].items():
+        print(f"  kept {role:15s} {hours:6.2f} h sung")
+    for reason, n in report["dropped_vocal_tracks_by_reason"].items():
+        print(f"  dropped {n:4d}  {reason}")
+    print(f"  full decisions: RAW/{batch}/import_report.json")
+    if args.dry_run:
+        return 0
+    manifest.save()
+    print(f"{len(new_records)} imported, {len(manifest)} records total")
+    if new_records:
+        print("next: singer/gender from the voice (records stay out of datasets until "
+              "both are set), clean --profile prod, Whisper lyrics draft, align --phrases.")
+    return 0
+
+
 def _cmd_manifest_import_vocalset(args: argparse.Namespace) -> int:
     from .ingest.vocalset import import_vocalset, summarize
     from .manifest import resolve_data_root
@@ -1232,6 +1261,18 @@ def main(argv: list[str] | None = None) -> int:
     csd_p.add_argument("--limit", type=int, default=None,
                        help="import at most N recordings (smoke tests)")
     csd_p.set_defaults(func=_cmd_manifest_import_csd)
+    mt_p = manifest_sub.add_parser(
+        "import-multitrack",
+        help="import the vocal tracks of raw studio multitrack sessions (one folder "
+             "per song); drop decisions are rule-based and written to a report")
+    mt_p.add_argument("--data-root", default=None,
+                      help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    mt_p.add_argument("--path", required=True, help="folder holding the song folders")
+    mt_p.add_argument("--batch", default=None,
+                      help="RAW/<batch> name for the copies (default: the folder's name)")
+    mt_p.add_argument("--dry-run", action="store_true",
+                      help="plan and write the report, copy nothing")
+    mt_p.set_defaults(func=_cmd_manifest_import_multitrack)
     corpus_p = manifest_sub.add_parser(
         "set-corpus", help="backfill meta.corpus on existing records"
     )
