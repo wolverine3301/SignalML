@@ -61,6 +61,7 @@ def test_helpers():
         == ("M", None, "F")
     assert identity.lead_base("LeadVox2DT1") == "LeadVox2"
     assert identity.lead_base("LeadVoxDTAdLib") == "LeadVox"
+    assert identity.artist_key("FytaKyte") == identity.artist_key("Fytakyte") == "fytakyte"
 
 
 def test_cards_group_main_vocals_with_guesses(data_root):

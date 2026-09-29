@@ -101,6 +101,7 @@ def test_folder_names():
     assert parse_folder_name("SomeBand_FirstSong_Full") == ("SomeBand", "FirstSong")
     assert parse_folder_name("MR0001_SomeSinger_Full") == ("SomeSinger", None)
     assert parse_folder_name("SomeBand_FirstSong") == ("SomeBand", "FirstSong")
+    assert parse_folder_name("SomeBand_Other_Stems") == ("SomeBand", "Other")
 
 
 @pytest.mark.parametrize("name,expected", [
@@ -158,6 +159,27 @@ def test_plan_batch_decisions(session_root):
     assert not vocal.keep and vocal.reason.startswith("live-room bleed")
 
 
+def test_short_part_in_a_long_silent_track(tmp_path):
+    """A backing part that sings a few seconds of a long track is >95% silence; it must
+    be judged on its singing, not read as 'no dynamics'."""
+    from signalml.ingest.multitrack import plan_folder
+
+    long_sec, voice = 120, _voice(300, 16)  # 12 s: 2 s phrases with 1 s rests
+
+    def part(seconds: int) -> np.ndarray:
+        y = np.zeros(long_sec * SR, np.float32)
+        y[30 * SR: 30 * SR + seconds * SR] = voice[: seconds * SR]
+        return y
+
+    s = tmp_path / "SomeBand_Sparse_Full"
+    _write(s / "01_Kick.wav", np.tile(_drums(17), 10))
+    _write(s / "02_BackingVox1.wav", part(9))  # three 2 s phrases, ~6 s sung
+    _write(s / "03_BackingVox2.wav", part(3))  # one 2 s phrase
+    plan = {t.track: t for t in plan_folder(s).tracks}
+    assert plan["BackingVox1"].keep, plan["BackingVox1"].reason
+    assert plan["BackingVox2"].reason.startswith("empty: 2.")
+
+
 def test_import_writes_unassigned_studio_records(session_root, tmp_path):
     root = tmp_path / "dr"
     manifest, new, report = import_multitrack(root, root=session_root, batch="batch_x")
@@ -174,6 +196,28 @@ def test_import_writes_unassigned_studio_records(session_root, tmp_path):
 
     again, new2, _ = import_multitrack(root, root=session_root, batch="batch_x")
     assert new2 == [] and len(again) == 5  # idempotent by checksum
+
+
+def test_grown_batch_plans_only_new_folders_and_keeps_docs(session_root, tmp_path):
+    root = tmp_path / "dr"
+    manifest, first, report = import_multitrack(root, root=session_root, batch="bx")
+    manifest.save()
+    assert report["planned_now"] == 5
+
+    new = session_root / "NewBand_Ballad_Full"
+    _write(new / "01_LeadVox.wav", _voice(260, 30))
+    (new / "Lyrics and notes.rtf").write_text("{\\rtf1 la la}", encoding="utf-8")
+    _write(session_root / "NewBand_Ballad_Stems" / "01_Vox.wav", _voice(260, 30))  # re-export
+    manifest, second, report = import_multitrack(root, root=session_root, batch="bx")
+    manifest.save()
+    assert report["planned_now"] == 2  # the new song and its stems export, nothing else
+    skipped = report["folders_skipped"]["NewBand_Ballad_Stems"]
+    assert skipped == "another export of NewBand_Ballad_Full"
+    assert len(second) == 1 and len(Manifest.for_data_root(root)) == len(first) + 1
+    docs = json.loads((song_dir(root, second[0].id) / "analysis.json")
+                      .read_text(encoding="utf-8"))["session_docs"]["files"]
+    assert docs == ["RAW/bx/NewBand_Ballad_Full/docs/Lyrics and notes.rtf"]
+    assert (root / docs[0]).read_text(encoding="utf-8") == "{\\rtf1 la la}"
 
 
 def test_dry_run_copies_nothing(session_root, tmp_path):

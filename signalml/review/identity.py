@@ -49,6 +49,11 @@ def display_name(name: str) -> str:
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", name or "").strip()
 
 
+def artist_key(name: str) -> str:
+    """One key per artist however its folders spell it (``FytaKyte`` = ``Fytakyte``)."""
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
 def gender_guess(f0_median_hz: float | None) -> str | None:
     if f0_median_hz is None:
         return None
@@ -137,12 +142,21 @@ def build_cards(data_root: str | Path) -> dict:
     cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
     n_cached = len(cache)
 
+    records = list(_main_vocal_records(manifest, data_root))
+    # the spelling with the most capitals splits into the most readable display name
+    spelling: dict[str, str] = {}
+    for _, info in records:
+        name = info.get("artist") or ""
+        k = artist_key(name)
+        if sum(c.isupper() for c in name) > sum(c.isupper() for c in spelling.get(k, "")):
+            spelling[k] = name
+
     songs: dict[tuple[str, str], dict] = {}
-    for rec, info in _main_vocal_records(manifest, data_root):
+    for rec, info in records:
         key = (info.get("batch") or "", info["folder"])
         card = songs.setdefault(key, {
             "key": f"{key[0]}/{key[1]}", "batch": key[0], "folder": key[1],
-            "artist": display_name(info.get("artist") or ""),
+            "artist": display_name(spelling.get(artist_key(info.get("artist") or ""), "")),
             "song": display_name(info.get("song") or "")
             or f"untitled ({key[1].split('_')[0]})", "tracks": []})
         f0 = info.get("f0_median_hz")

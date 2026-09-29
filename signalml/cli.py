@@ -364,11 +364,12 @@ def _cmd_manifest_import_multitrack(args: argparse.Namespace) -> int:
     batch = args.batch or Path(args.path).name
     manifest, new_records, report = import_multitrack(
         resolve_data_root(args.data_root), root=args.path, batch=batch,
-        dry_run=args.dry_run)
+        dry_run=args.dry_run, replan=args.replan)
     for folder, reason in report["folders_skipped"].items():
         print(f"  SKIPPED folder {folder}: {reason}", file=sys.stderr)
     print(f"import-multitrack{' (dry run)' if args.dry_run else ''}: "
-          f"{report['kept_tracks']} vocal track(s) kept of {report['folders']} folder(s)")
+          f"{report['kept_tracks']} vocal track(s) kept of {report['folders']} folder(s) "
+          f"({report['planned_now']} folder(s) analysed now, the rest carried over)")
     for role, hours in report["kept_sung_hours_by_role"].items():
         print(f"  kept {role:15s} {hours:6.2f} h sung")
     for reason, n in report["dropped_vocal_tracks_by_reason"].items():
@@ -1295,6 +1296,9 @@ def main(argv: list[str] | None = None) -> int:
                       help="RAW/<batch> name for the copies (default: the folder's name)")
     mt_p.add_argument("--dry-run", action="store_true",
                       help="plan and write the report, copy nothing")
+    mt_p.add_argument("--replan", action="store_true",
+                      help="re-analyse every folder, not only those new since the last "
+                           "report (after changing the rules or the folders)")
     mt_p.set_defaults(func=_cmd_manifest_import_multitrack)
     corpus_p = manifest_sub.add_parser(
         "set-corpus", help="backfill meta.corpus on existing records"

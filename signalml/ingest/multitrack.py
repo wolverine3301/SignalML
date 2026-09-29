@@ -97,6 +97,11 @@ DROP_BY_NAME: tuple[tuple[re.Pattern, str], ...] = (
     (re.compile(r"choir", re.I), "choir: a group of voices, no single singer"),
 )
 EXCERPT_OF = "_full"
+FOLDER_SUFFIX = re.compile(r"_(full|stems)$", re.I)
+# documents a session ships beside its audio: lyrics, lead sheets, notes, MIDI. Kept with
+# the imported tracks so the lyrics step (and later work) can use them.
+DOC_SUFFIXES = frozenset({".txt", ".rtf", ".pdf", ".doc", ".docx", ".odt", ".mid", ".midi",
+                          ".xml", ".musicxml", ".mxl", ".csv", ".xls", ".xlsx"})
 
 
 @dataclass
@@ -118,15 +123,24 @@ class FolderPlan:
     song: str | None
     skip_reason: str = ""
     tracks: list[TrackDecision] = field(default_factory=list)
+    docs: list[str] = field(default_factory=list)  # source paths of session documents
 
     @property
     def kept(self) -> list[TrackDecision]:
         return [t for t in self.tracks if t.keep]
 
+    @classmethod
+    def from_dict(cls, d: dict) -> FolderPlan:
+        return cls(folder=d["folder"], artist=d["artist"], song=d.get("song"),
+                   skip_reason=d.get("skip_reason", ""),
+                   tracks=[TrackDecision(**t) for t in d.get("tracks", [])],
+                   docs=list(d.get("docs", [])))
+
 
 def parse_folder_name(name: str) -> tuple[str, str | None]:
-    """``Artist_Song_Full`` -> (Artist, Song); ``MR1001_Artist_Full`` -> (Artist, None)."""
-    base = re.sub(r"_full$", "", name, flags=re.I)
+    """``Artist_Song_Full`` / ``Artist_Song_Stems`` -> (Artist, Song);
+    ``MR1001_Artist_Full`` -> (Artist, None)."""
+    base = FOLDER_SUFFIX.sub("", name)
     coded = re.match(r"^[A-Z]{1,4}\d{3,}_(.+)$", base)
     if coded:
         return coded.group(1), None
@@ -140,6 +154,11 @@ def track_name(path: Path) -> str:
 
 def _is_junk(path: Path) -> bool:
     return "__MACOSX" in path.parts or path.name.startswith("._")
+
+
+def session_docs(folder: Path) -> list[Path]:
+    return [p for p in sorted(folder.rglob("*"))
+            if p.is_file() and p.suffix.lower() in DOC_SUFFIXES and not _is_junk(p)]
 
 
 def song_tracks(folder: Path) -> list[Path]:
@@ -191,7 +210,13 @@ def _frame_db(y: np.ndarray, hop: int = 400) -> tuple[np.ndarray, np.ndarray]:
     if n == 0:
         return np.full(1, -200.0), np.full(1, -200.0)
     rms = np.sqrt(np.mean(y[: n * hop].reshape(n, hop) ** 2, axis=1)) + 1e-10
-    return 20 * np.log10(rms / np.percentile(rms, 95)), 20 * np.log10(rms)
+    dbfs = 20 * np.log10(rms)
+    # the loud level comes from the audible frames: a backing part that sings for ten
+    # seconds of a three-minute track is >95% digital silence, and a percentile over all
+    # frames would make silence the reference
+    audible = rms[dbfs > AUDIBLE_DBFS]
+    ref = np.percentile(audible if len(audible) else rms, 95)
+    return 20 * np.log10(rms / ref), dbfs
 
 
 def _xcorr(a: np.ndarray, b: np.ndarray, max_lag: int) -> float:
@@ -259,10 +284,13 @@ def _f0_median(y: np.ndarray, sung_mask: np.ndarray, hop: int = 400) -> float | 
 def plan_folder(folder: Path, *, siblings: set[str] | None = None) -> FolderPlan:
     """Decide every track of one song folder. Reads audio (8 kHz analysis copies)."""
     artist, song = parse_folder_name(folder.name)
-    plan = FolderPlan(folder=folder.name, artist=artist, song=song)
+    plan = FolderPlan(folder=folder.name, artist=artist, song=song,
+                      docs=[str(p) for p in session_docs(folder)])
+    base = FOLDER_SUFFIX.sub("", folder.name)
     if siblings and not folder.name.lower().endswith(EXCERPT_OF) \
-            and f"{folder.name}{EXCERPT_OF}".lower() in siblings:
-        plan.skip_reason = f"excerpt of {folder.name}_Full"
+            and f"{base}{EXCERPT_OF}".lower() in siblings:
+        plan.skip_reason = (f"excerpt of {base}_Full" if base == folder.name
+                            else f"another export of {base}_Full")
         return plan
 
     paths = song_tracks(folder)
@@ -340,11 +368,23 @@ def plan_folder(folder: Path, *, siblings: set[str] | None = None) -> FolderPlan
     return plan
 
 
-def plan_batch(root: str | Path) -> list[FolderPlan]:
+def plan_batch(root: str | Path, *, reuse: dict[str, dict] | None = None) -> list[FolderPlan]:
+    """Plan every song folder. Folders found in ``reuse`` (a previous report's plans,
+    keyed by folder name) keep their decisions and are not read again, so a batch that
+    grows by a few folders costs only the new ones."""
     root = Path(root)
+    reuse = reuse or {}
     folders = sorted(p for p in root.iterdir() if p.is_dir() and not _is_junk(p))
     names = {p.name.lower() for p in folders}
-    return [plan_folder(f, siblings=names) for f in folders]
+    plans = []
+    for f in folders:
+        if f.name in reuse:
+            plan = FolderPlan.from_dict(reuse[f.name])
+            plan.docs = [str(p) for p in session_docs(f)]
+        else:
+            plan = plan_folder(f, siblings=names)
+        plans.append(plan)
+    return plans
 
 
 def batch_report(plans: list[FolderPlan]) -> dict:
@@ -376,36 +416,61 @@ def import_multitrack(
     root: str | Path,
     batch: str,
     dry_run: bool = False,
+    replan: bool = False,
 ) -> tuple[Manifest, list[ManifestRecord], dict]:
     """Plan a batch and import its kept vocal tracks. Caller saves the manifest.
 
     Kept tracks are copied to ``RAW/<batch>/<folder>/`` (the source tree holds the whole
-    session, instruments included) and to ``songs/<id>/stems/vocals.wav``. Idempotent by
-    checksum. The report is written to ``RAW/<batch>/import_report.json`` either way.
+    session, instruments included) and to ``songs/<id>/stems/vocals.wav``; the session
+    documents (lyrics, lead sheets, MIDI) go to ``RAW/<batch>/<folder>/docs/``. Re-running
+    on a grown batch plans only the new folders (``replan`` re-checks every folder) and
+    imports only what the manifest does not hold yet. The report is written to
+    ``RAW/<batch>/import_report.json`` either way.
     """
     data_root = Path(data_root)
-    plans = plan_batch(root)
+    raw_dir = data_root / "RAW" / batch
+    report_path = raw_dir / "import_report.json"
+    reuse = {}
+    if report_path.exists() and not replan:
+        previous = json.loads(report_path.read_text(encoding="utf-8"))
+        reuse = {p["folder"]: p for p in previous["plans"]}
+    plans = plan_batch(root, reuse=reuse)
     report = batch_report(plans)
+    report["planned_now"] = sum(1 for fp in plans if fp.folder not in reuse)
     manifest = Manifest.for_data_root(data_root)
     new_records: list[ManifestRecord] = []
-    raw_dir = data_root / "RAW" / batch
     raw_dir.mkdir(parents=True, exist_ok=True)
-    (raw_dir / "import_report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=1), encoding="utf-8")
     if dry_run:
         return manifest, new_records, report
 
+    by_path = {r.file.path: r for r in manifest.records}
     for fp in plans:
+        if not fp.kept:
+            continue
+        docs = []
+        for doc in map(Path, fp.docs):
+            ddst = raw_dir / short_name(fp.folder) / "docs" / doc.name
+            ddst.parent.mkdir(parents=True, exist_ok=True)
+            if not ddst.exists():
+                shutil.copyfile(doc, ddst)
+            docs.append(ddst.relative_to(data_root).as_posix())
         for t in fp.kept:
             src = Path(t.path)
+            dst = raw_dir / short_name(fp.folder) / src.name
+            rel = dst.relative_to(data_root).as_posix()
+            if rel in by_path:  # imported by an earlier run: only refresh its documents
+                if docs:
+                    update_analysis(song_dir(data_root, by_path[rel].id), "session_docs",
+                                    {"files": docs})
+                continue
             digest = sha256_file(src)
             if manifest.by_sha256(digest):
                 continue
-            dst = raw_dir / short_name(fp.folder) / src.name
             dst.parent.mkdir(parents=True, exist_ok=True)
             if not dst.exists():
                 shutil.copyfile(src, dst)
             info = sf.info(str(dst))
-            rel = dst.relative_to(data_root).as_posix()
             title = f"{fp.artist} - {fp.song or fp.folder}"
             rec = ManifestRecord(
                 id=manifest.next_id(),
@@ -436,6 +501,9 @@ def import_multitrack(
                                **t.stats},
                 "date": date.today().isoformat(),
             })
+            if docs:
+                update_analysis(sdir, "session_docs", {"files": docs})
             manifest.add(rec)
+            by_path[rel] = rec
             new_records.append(rec)
     return manifest, new_records, report
