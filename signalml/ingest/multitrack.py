@@ -229,15 +229,16 @@ def _phat(a: np.ndarray, b: np.ndarray, max_lag: int) -> float:
     return float(np.max(np.abs(np.concatenate([c[-max_lag:], c[: max_lag + 1]]))))
 
 
-def _sung_windows(sung_mask: np.ndarray, hop: int = 400) -> list[tuple[float, float]]:
-    """Up to N_WINDOWS non-overlapping windows (seconds) with the most sung frames."""
-    per = int(WINDOW_SEC * ANALYSIS_SR / hop)
+def _sung_windows(sung_mask: np.ndarray, hop: int = 400, *, n: int = N_WINDOWS,
+                  window_sec: float = WINDOW_SEC) -> list[tuple[float, float]]:
+    """Up to ``n`` non-overlapping windows (seconds) with the most sung frames."""
+    per = int(window_sec * ANALYSIS_SR / hop)
     sung = sung_mask.astype(float)
     if len(sung) < per:
         return [(0.0, len(sung) * hop / ANALYSIS_SR)]
     score = np.convolve(sung, np.ones(per), mode="valid")
     out: list[tuple[float, float]] = []
-    for _ in range(N_WINDOWS):
+    for _ in range(n):
         i = int(np.argmax(score))
         if score[i] <= 0:
             break

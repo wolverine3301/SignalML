@@ -935,6 +935,29 @@ def _cmd_dash(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_review_serve(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .review.server import serve
+
+    serve(resolve_data_root(args.data_root), port=args.port, open_browser=not args.no_open)
+    return 0
+
+
+def _cmd_review_apply(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .review.identity import apply_labels
+
+    manifest, changed = apply_labels(resolve_data_root(args.data_root), dry_run=args.dry_run)
+    for rid, diff in changed:
+        print(f"  {rid}: " + ", ".join(f"{k} {old!r} -> {new!r}" for k, (old, new) in diff.items()))
+    if args.dry_run:
+        print(f"review apply (dry run): {len(changed)} record(s) would change")
+        return 0
+    manifest.save()
+    print(f"review apply: {len(changed)} record(s) updated")
+    return 0
+
+
 def _gb(nbytes: int) -> str:
     return f"{nbytes / (1 << 30):.2f} GB"
 
@@ -1609,6 +1632,25 @@ def main(argv: list[str] | None = None) -> int:
     dash_p.add_argument("--no-open", action="store_true",
                         help="don't open the browser automatically")
     dash_p.set_defaults(func=_cmd_dash)
+
+    review_p = subparsers.add_parser(
+        "review", help="local pages for the human checks the pipeline cannot make itself")
+    review_sub = review_p.add_subparsers(dest="command", required=True)
+    rv_serve = review_sub.add_parser(
+        "serve", help="identity review: gender/singer/flags for main vocal tracks")
+    rv_serve.add_argument("--data-root", default=None,
+                          help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    rv_serve.add_argument("--port", type=int, default=8775)
+    rv_serve.add_argument("--no-open", action="store_true",
+                          help="don't open the browser automatically")
+    rv_serve.set_defaults(func=_cmd_review_serve)
+    rv_apply = review_sub.add_parser(
+        "apply", help="write the review answers into the manifest (gender, singer, "
+                      "language, excluded)")
+    rv_apply.add_argument("--data-root", default=None,
+                          help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    rv_apply.add_argument("--dry-run", action="store_true", help="list changes, write nothing")
+    rv_apply.set_defaults(func=_cmd_review_apply)
 
     # ship — LAN transfer of a corpus selection + the code that produced it
     # studio (post-P8 UI; the model-free half is usable now - docs/STUDIO_UI.md)

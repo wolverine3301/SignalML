@@ -441,7 +441,9 @@ def _select(manifest: Manifest, recipe: DatasetRecipe, summary: BuildSummary,
         reason = None
         if f.ids and rec.id not in f.ids:
             continue  # not even reported: an explicit whitelist is self-documenting
-        if rec.meta.domain != f.domain:
+        if rec.meta.excluded:
+            reason = f"excluded by review: {rec.meta.excluded}"
+        elif rec.meta.domain != f.domain:
             reason = f"domain {rec.meta.domain!r} != {f.domain!r}"
         elif rec.meta.language != f.language:
             reason = f"language {rec.meta.language!r} != {f.language!r}"

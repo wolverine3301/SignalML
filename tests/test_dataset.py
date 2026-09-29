@@ -527,6 +527,20 @@ class TestBuild:
         assert only.songs_used == [human]
         assert only.skipped[asr] == "machine lyrics (asr) excluded by recipe"
 
+    def test_review_exclusion(self, tmp_path, make_wav):
+        """A record a reviewer marked as a bad take never reaches a dataset."""
+        root = tmp_path / "dr"
+        keep = _ready_song(root, make_wav, singer="alice")
+        bad = _ready_song(root, make_wav, singer="bea")
+        manifest = Manifest.for_data_root(root)
+        rec = manifest.get(bad)
+        rec.meta.excluded = "bad_take"
+        manifest.upsert(rec)
+        manifest.save()
+        summary = build(root, recipe=recipe(name="t_review"))
+        assert summary.songs_used == [keep]
+        assert summary.skipped[bad] == "excluded by review: bad_take"
+
     def test_null_gender_refused(self, tmp_path, make_wav):
         root = tmp_path / "dr"
         make_wav(root / "raw" / "x.wav")

@@ -75,6 +75,9 @@ class MetaInfo(BaseModel):
     # recipes select/exclude on it, so a training run can be scoped to one corpus, to
     # a combination, or to everything permissively licensed. None = untagged.
     corpus: str | None = None
+    # a human verdict that this record must not train anything ("bad_take",
+    # "not_singing"), set by `review apply`; dataset build skips it. None = usable.
+    excluded: str | None = None
 
 
 class StatusFlags(BaseModel):
