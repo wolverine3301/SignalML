@@ -243,3 +243,21 @@ def test_reopened_tracks_are_pending_with_answers_kept(data_root):
                   identity.validate_label({"id": "sng_9004", "gender": "F",
                                            "singer": "some band-f"}, {"sng_9004"})])
     assert duet()["confirmed"]
+
+
+def test_effected_and_duplicate_flags(data_root):
+    """Effected: processing=heavy (recipes exclude it) and back on un-flagging;
+    duplicate: excluded."""
+    store = identity.LabelStore(data_root)
+    store.append([{"id": "sng_9003", "gender": None, "singer": "some band",
+                   "flags": ["effected", "wordless"]},
+                  {"id": "sng_9004", "gender": "F", "singer": "some band",
+                   "flags": ["duplicate", "wordless"]}])
+    manifest, _ = identity.apply_labels(data_root)
+    manifest.save()
+    m = Manifest.for_data_root(data_root)
+    assert m.get("sng_9003").meta.processing == "heavy"
+    assert m.get("sng_9004").meta.excluded == "duplicate"
+    store.append([{"id": "sng_9003", "gender": "M", "singer": "some band", "flags": []}])
+    manifest, _ = identity.apply_labels(data_root)
+    assert manifest.get("sng_9003").meta.processing == "dry"

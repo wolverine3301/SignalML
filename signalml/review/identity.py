@@ -47,8 +47,12 @@ FLAGS = {
     # oohs/aahs are singing and stay in: the flag only tells the lyrics step not to expect
     # words (Whisper hears nothing, which is right, not a failed transcription)
     "wordless": "sung without words throughout (oohs, aahs) - still singing, kept",
+    # heavy effects / pitch-shifting / a voice played as an instrument: sets
+    # processing=heavy, which dataset recipes exclude by default (reversible)
+    "effected": "heavily effected or pitch-shifted, used as an instrument",
+    "duplicate": "the same recording as another track of the song (keep the other)",
 }
-EXCLUDING_FLAGS = ("bad_take", "not_singing", "harsh")
+EXCLUDING_FLAGS = ("bad_take", "not_singing", "harsh", "duplicate")
 N_SNIPPETS, SNIPPET_SEC, MAX_SNIPPET_SEC = 3, 6.0, 15.0
 # Pitch only rules a voice male: on a reviewed multitrack batch the men sang at a median
 # F0 of 248 Hz (p95 474) - right over the women (277-425) - and a pitch "female" guess
@@ -328,6 +332,14 @@ def full_track_wav(data_root: str | Path, rec_id: str) -> bytes:
     return buf.getvalue()
 
 
+def _import_processing(rec) -> str | None:
+    """What the importer tagged (``review`` only ever raises it to heavy): a record
+    un-flagged as effected goes back to its import value, not to whatever was there."""
+    if rec.meta.processing != "heavy":
+        return rec.meta.processing
+    return "produced" if re.search(r"(?<!un)tuned", rec.meta.song or "", re.I) else "dry"
+
+
 def apply_labels(
     data_root: str | Path, *, dry_run: bool = False
 ) -> tuple[Manifest, list[tuple[str, dict]]]:
@@ -354,6 +366,7 @@ def apply_labels(
             "singer": singers[rid],
             "language": "und" if "not_english" in flags else "en",
             "excluded": ", ".join(f for f in EXCLUDING_FLAGS if f in flags) or None,
+            "processing": "heavy" if "effected" in flags else _import_processing(rec),
         }
         diff = {k: (getattr(rec.meta, k), v) for k, v in new.items() if getattr(rec.meta, k) != v}
         if not diff:
