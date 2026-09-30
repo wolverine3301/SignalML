@@ -35,6 +35,7 @@ nav button:hover { background: var(--chip); }
 nav button.current { background: var(--focus); }
 nav .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; transform: translateY(-1px); }
 nav .done .dot { background: var(--ok); }
+nav .warn .dot { background: var(--warn); }
 nav .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 nav .name small { color: var(--muted); }
 section.card { padding: 20px 28px 40px; max-width: 1100px; }
@@ -61,6 +62,8 @@ section.card { padding: 20px 28px 40px; max-width: 1100px; }
 .flags label, .same { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; color: var(--muted); cursor: pointer;
   padding: 2px 7px; border-radius: 99px; background: var(--chip); }
 .flags label.on { background: var(--warn); color: var(--panel); }
+.alert { display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 99px; font-size: 12px;
+  background: var(--warn); color: var(--panel); }
 .row.same-on .seg, .row.same-on input[type=text] { opacity: .45; pointer-events: none; }
 .actions { display: flex; gap: 12px; align-items: center; margin-top: 18px; }
 .primary { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px; padding: 9px 18px;
@@ -114,7 +117,8 @@ function renderList() {
   const nav = $("#list"); nav.innerHTML = "";
   for (const [c, i] of visible()) {
     const b = document.createElement("button");
-    b.className = (c.confirmed ? "done " : "") + (i === cur ? "current" : "");
+    b.className = (c.harsh_warning ? "warn " : c.confirmed ? "done " : "") + (i === cur ? "current" : "");
+    if (c.harsh_warning) b.title = "a confirmed track here sounds harsh - worth a second listen";
     b.innerHTML = `<span class="dot"></span><span class="name">${esc(c.artist)} <small>— ${esc(c.song)}</small></span>`;
     b.onclick = () => open(i);
     nav.appendChild(b);
@@ -128,7 +132,7 @@ function stateFor(t) {
     t, isDouble,
     gender: L ? L.gender : t.guess_gender, genderGuessed: !L,
     singer: L ? (L.singer || "") : t.guess_singer, singerGuessed: !L,
-    flags: new Set(L ? L.flags : []),
+    flags: new Set(L ? L.flags : (t.harsh && t.harsh.likely ? ["harsh"] : [])),
     same: isDouble ? (L ? !!L.same_as_lead : true) : false,
   };
 }
@@ -158,8 +162,14 @@ function drawRows() {
     const t = r.t, el = document.createElement("div");
     el.className = "row" + (r.isDouble ? " double" : "") + (k === focus ? " focus" : "") + (r.same ? " same-on" : "");
     const f0 = t.f0 ? `~${Math.round(t.f0)} Hz` : "no pitch";
+    const h = t.harsh;
+    const harshNote = h && h.likely
+      ? (t.label && !t.label.flags.includes("harsh") && !t.label.harsh_seen
+          ? `<br><span class="alert" title="measured: ${Math.round(100 * h.pitchless)}% of loud frames pitchless, median HNR ${h.hnr_median} dB">sounds harsh? re-check</span>`
+          : `<br><span>harsh guess: ${Math.round(100 * h.pitchless)}% pitchless</span>`)
+      : "";
     el.innerHTML = `
-      <div class="t"><b>${esc(t.track)}</b><span class="chip">${esc(t.role.replace("_", " "))}</span> <span>${f0} · ${Math.round(t.sung_sec || 0)} s sung</span></div>
+      <div class="t"><b>${esc(t.track)}</b><span class="chip">${esc(t.role.replace("_", " "))}</span> <span>${f0} · ${Math.round(t.sung_sec || 0)} s sung</span>${harshNote}</div>
       <div class="snips">${t.snippets.map((s, j) => `<button data-j="${j}" title="${s[0].toFixed(0)} s">${j + 1}</button>`).join("")}</div>
       <div class="seg">${["F", "M", null].map(g => `<button data-g="${g}" class="${r.gender === g ? (r.genderGuessed ? "on guess" : "on") : ""}">${g || "?"}</button>`).join("")}</div>
       <div class="who">
@@ -207,7 +217,7 @@ async function confirm() {
     const lead = r.same && r.t.lead_id ? byId[r.t.lead_id] : null;
     const src = lead || r;
     return { id: r.t.id, gender: src.gender, singer: (src.singer || "").trim() || null,
-             flags: [...r.flags], same_as_lead: !!lead };
+             flags: [...r.flags], same_as_lead: !!lead, harsh_seen: !!(r.t.harsh && r.t.harsh.likely) };
   });
   const res = await fetch("/api/identity/labels", { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labels }) });
@@ -218,6 +228,7 @@ async function confirm() {
   if (!c.confirmed) data.progress.confirmed++;
   data.progress.labelled += newly;
   c.confirmed = true;
+  c.harsh_warning = false;  // every harsh measurement on this card was just in front of the reviewer
   const artist = c.artist;
   for (const card of data.cards) if (card.artist === artist)
     card.known_singers = [...new Set([...card.known_singers, ...labels.map(l => l.singer).filter(Boolean)])];

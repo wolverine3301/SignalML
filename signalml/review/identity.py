@@ -4,7 +4,9 @@ The queue is every multitrack record whose role is a lead (or an unnamed vocal, 
 is often the lead), one card per song. Each track gets a few short snippets from its
 clearest sung passages and a pre-filled guess - gender from the median-F0 hint the
 importer stored, singer from the artist name - so reviewing is mostly confirming.
-Doubles fold under their lead: same singer unless the reviewer says otherwise.
+Doubles fold under their lead: same singer unless the reviewer says otherwise. Tracks
+that measure as screams/growls (:func:`..audio.voice.harshness`) get ``harsh`` pre-ticked,
+and a confirmed track that measures harsh without the flag is marked for a second listen.
 
 Answers append to ``DATA_ROOT/review/identity.jsonl`` (latest line per record wins, so
 nothing is ever lost) and reach the manifest only through :func:`apply_labels`, which
@@ -24,12 +26,14 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from ..audio.voice import harshness
 from ..ingest import multitrack as mt
 from ..manifest import Manifest, _normalize_singer
 from ..stages.common import song_dir, update_analysis
 
 LABELS_FILE = Path("review") / "identity.jsonl"
 SNIPPET_CACHE = Path("review") / "snippets.json"
+HARSH_CACHE = Path("review") / "harsh.json"
 MAIN_ROLES = frozenset({"lead", "lead_double", "vocal", "vocal_double"})
 FLAGS = {
     "not_lead": "not the lead singer",
@@ -111,7 +115,10 @@ def validate_label(label: dict, known_ids: set[str]) -> dict:
     if not isinstance(flags, list) or set(flags) - set(FLAGS):
         raise ValueError(f"flags must be a subset of {sorted(FLAGS)}")
     return {"id": rid, "gender": gender, "singer": _normalize_singer(singer),
-            "flags": sorted(set(flags)), "same_as_lead": bool(label.get("same_as_lead"))}
+            "flags": sorted(set(flags)), "same_as_lead": bool(label.get("same_as_lead")),
+            # confirmed while the harsh measurement was on screen: a "not harsh" is a
+            # decision, not an oversight, so the re-check warning retires
+            "harsh_seen": bool(label.get("harsh_seen"))}
 
 
 def _snippets(data_root: Path, rec_id: str, cache: dict) -> list[list[float]]:
@@ -123,6 +130,23 @@ def _snippets(data_root: Path, rec_id: str, cache: dict) -> list[list[float]]:
         wins = mt._sung_windows(mask, n=N_SNIPPETS, window_sec=SNIPPET_SEC)
         cache[rec_id] = sorted([round(a, 2), round(b - a, 2)] for a, b in wins)
     return cache[rec_id]
+
+
+def _harsh(data_root: Path, rec_id: str, cache: dict) -> dict | None:
+    if rec_id not in cache:
+        y, sr = sf.read(str(song_dir(data_root, rec_id) / "stems" / "vocals.wav"),
+                        dtype="float32", always_2d=True)
+        cache[rec_id] = harshness(y.mean(axis=1), sr)
+    return cache[rec_id]
+
+
+def _load_cache(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def _save_cache(path: Path, cache: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cache), encoding="utf-8")
 
 
 def _main_vocal_records(manifest: Manifest, data_root: Path):
@@ -142,9 +166,8 @@ def build_cards(data_root: str | Path) -> dict:
     data_root = Path(data_root)
     manifest = Manifest.for_data_root(data_root)
     labels = LabelStore(data_root).load()
-    cache_path = data_root / SNIPPET_CACHE
-    cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
-    n_cached = len(cache)
+    snips, harsh = _load_cache(data_root / SNIPPET_CACHE), _load_cache(data_root / HARSH_CACHE)
+    n_snips, n_harsh = len(snips), len(harsh)
 
     records = list(_main_vocal_records(manifest, data_root))
     # the spelling with the most capitals splits into the most readable display name
@@ -167,11 +190,13 @@ def build_cards(data_root: str | Path) -> dict:
         card["tracks"].append({
             "id": rec.id, "track": info["track"], "role": info["role"], "f0": f0,
             "guess_gender": gender_guess(f0), "sung_sec": info.get("sung_sec"),
-            "snippets": _snippets(data_root, rec.id, cache), "label": labels.get(rec.id)})
+            "snippets": _snippets(data_root, rec.id, snips),
+            "harsh": _harsh(data_root, rec.id, harsh), "label": labels.get(rec.id)})
 
-    if len(cache) != n_cached:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(json.dumps(cache), encoding="utf-8")
+    if len(snips) != n_snips:
+        _save_cache(data_root / SNIPPET_CACHE, snips)
+    if len(harsh) != n_harsh:
+        _save_cache(data_root / HARSH_CACHE, harsh)
 
     singers_by_artist: dict[str, set[str]] = {}
     for card in songs.values():
@@ -191,6 +216,11 @@ def build_cards(data_root: str | Path) -> dict:
                 singers_by_artist.setdefault(card["artist"], set()).add(t["label"]["singer"])
         card["tracks"] = tracks
         card["confirmed"] = all(t["label"] for t in tracks)
+        # confirmed before the harsh flag existed, or missed: worth a second listen
+        card["harsh_warning"] = any(
+            t["label"] and (t["harsh"] or {}).get("likely")
+            and "harsh" not in t["label"]["flags"] and not t["label"].get("harsh_seen")
+            for t in tracks)
 
     cards = sorted(songs.values(), key=lambda c: (c["batch"], c["folder"]))
     for card in cards:

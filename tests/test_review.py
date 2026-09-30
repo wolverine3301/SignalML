@@ -20,6 +20,13 @@ from signalml.stages.common import song_dir, update_analysis
 SR = 16000
 
 
+def _scream(seconds: float = 20.0) -> np.ndarray:
+    """Loud pitchless noise in the same phrasing: what a screamed track measures like."""
+    t = np.arange(int(seconds * SR)) / SR
+    y = np.random.default_rng(5).normal(0, 0.2, len(t))
+    return (y * ((t % 4.0) < 3.0)).astype(np.float32)
+
+
 def _voice(f0: float, seconds: float = 20.0) -> np.ndarray:
     t = np.arange(int(seconds * SR)) / SR
     y = sum(0.2 / k * np.sin(2 * np.pi * k * f0 * t) for k in range(1, 5))
@@ -28,8 +35,8 @@ def _voice(f0: float, seconds: float = 20.0) -> np.ndarray:
 
 @pytest.fixture()
 def data_root(tmp_path) -> Path:
-    """Two songs: a solo artist (lead + its double + a backing track, which is not a
-    main vocal) and a band with a male and a female lead."""
+    """Three songs: a solo artist (lead + its double + a backing track, which is not a
+    main vocal), a band with a male and a female lead, and a screamed lead."""
     root = tmp_path / "dr"
     manifest = Manifest.for_data_root(root)
     tracks = [
@@ -38,12 +45,14 @@ def data_root(tmp_path) -> Path:
         ("SoloArtist_FirstSong_Full", "SoloArtist", "FirstSong", "BackingVox1", "backing", 400.0),
         ("SomeBand_Duet_Full", "SomeBand", "Duet", "LeadVox1", "lead", 150.0),
         ("SomeBand_Duet_Full", "SomeBand", "Duet", "LeadVox2", "lead", 320.0),
+        ("LoudBand_Scream_Full", "LoudBand", "Scream", "LeadVox", "lead", None),
     ]
     for i, (folder, artist, song, track, role, f0) in enumerate(tracks):
         rid = f"sng_{9000 + i}"
         sdir = song_dir(root, rid)
         (sdir / "stems").mkdir(parents=True)
-        sf.write(str(sdir / "stems" / "vocals.wav"), _voice(f0), SR, subtype="PCM_16")
+        audio = _voice(f0) if f0 else _scream()
+        sf.write(str(sdir / "stems" / "vocals.wav"), audio, SR, subtype="PCM_16")
         update_analysis(sdir, "separate", {"multitrack": {
             "batch": "b1", "folder": folder, "artist": artist, "song": song, "track": track,
             "role": role, "sung_sec": 15.0, "f0_median_hz": f0}})
@@ -67,7 +76,7 @@ def test_helpers():
 def test_cards_group_main_vocals_with_guesses(data_root):
     payload = identity.build_cards(data_root)
     cards = {c["folder"]: c for c in payload["cards"]}
-    assert payload["progress"] == {"songs": 2, "confirmed": 0, "tracks": 4, "labelled": 0}
+    assert payload["progress"] == {"songs": 3, "confirmed": 0, "tracks": 5, "labelled": 0}
 
     solo = {t["track"]: t for t in cards["SoloArtist_FirstSong_Full"]["tracks"]}
     assert set(solo) == {"LeadVox", "LeadVoxDT"}  # backing is not a main vocal
@@ -81,6 +90,26 @@ def test_cards_group_main_vocals_with_guesses(data_root):
     assert duet["LeadVox1"]["guess_singer"] == "some band-m"
     assert duet["LeadVox2"]["guess_singer"] == "some band-f"
     assert (data_root / identity.SNIPPET_CACHE).exists()
+    assert not solo["LeadVox"]["harsh"]["likely"]
+    assert cards["LoudBand_Scream_Full"]["tracks"][0]["harsh"]["likely"]
+
+
+def test_harsh_warning_until_rechecked(data_root):
+    """A screamed track confirmed without the flag is marked for a second listen; a
+    confirm made with the measurement on screen retires the warning either way."""
+    store = identity.LabelStore(data_root)
+    scream = "sng_9005"
+
+    def warning() -> bool:
+        cards = {c["folder"]: c for c in identity.build_cards(data_root)["cards"]}
+        return cards["LoudBand_Scream_Full"]["harsh_warning"]
+
+    assert not warning()  # unconfirmed: the page pre-ticks harsh instead
+    store.append([{"id": scream, "gender": "M", "singer": "loud band", "flags": []}])
+    assert warning()
+    store.append([{"id": scream, "gender": "M", "singer": "loud band", "flags": [],
+                   "harsh_seen": True}])  # listened again: it is gritty singing
+    assert not warning()
 
 
 def test_snippet_wav_is_normalised(data_root):
