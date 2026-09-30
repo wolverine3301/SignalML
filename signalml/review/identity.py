@@ -50,7 +50,10 @@ FLAGS = {
 }
 EXCLUDING_FLAGS = ("bad_take", "not_singing", "harsh")
 N_SNIPPETS, SNIPPET_SEC, MAX_SNIPPET_SEC = 3, 6.0, 15.0
-M_BELOW_HZ, F_ABOVE_HZ = 200.0, 250.0  # between: tenors and altos overlap, no guess
+# Pitch only rules a voice male: on a reviewed multitrack batch the men sang at a median
+# F0 of 248 Hz (p95 474) - right over the women (277-425) - and a pitch "female" guess
+# was wrong 114 times out of 114 misses. Above M_BELOW_HZ the voice classifier decides.
+M_BELOW_HZ = 250.0
 SNIPPET_PEAK = 10 ** (-3 / 20)  # snippets are peak-normalised to -3 dBFS for listening
 MAX_GAIN = 10 ** (30 / 20)
 
@@ -68,11 +71,7 @@ def artist_key(name: str) -> str:
 def gender_guess(f0_median_hz: float | None) -> str | None:
     if f0_median_hz is None:
         return None
-    if f0_median_hz < M_BELOW_HZ:
-        return "M"
-    if f0_median_hz > F_ABOVE_HZ:
-        return "F"
-    return None
+    return "M" if f0_median_hz < M_BELOW_HZ else None
 
 
 def lead_base(track: str) -> str:

@@ -66,8 +66,9 @@ def data_root(tmp_path) -> Path:
 def test_helpers():
     assert identity.display_name("AnnaSomebodyAndTheBand") == "Anna Somebody And The Band"
     assert identity.display_name("MR1001") == "MR1001"
-    assert (identity.gender_guess(150), identity.gender_guess(230), identity.gender_guess(300)) \
-        == ("M", None, "F")
+    # pitch can rule a voice male, never female (high male singers overlap women)
+    assert (identity.gender_guess(150), identity.gender_guess(249), identity.gender_guess(300)) \
+        == ("M", "M", None)
     assert identity.lead_base("LeadVox2DT1") == "LeadVox2"
     assert identity.lead_base("LeadVoxDTAdLib") == "LeadVox"
     assert identity.artist_key("FytaKyte") == identity.artist_key("Fytakyte") == "fytakyte"
@@ -81,14 +82,15 @@ def test_cards_group_main_vocals_with_guesses(data_root):
     solo = {t["track"]: t for t in cards["SoloArtist_FirstSong_Full"]["tracks"]}
     assert set(solo) == {"LeadVox", "LeadVoxDT"}  # backing is not a main vocal
     assert solo["LeadVoxDT"]["lead_id"] == solo["LeadVox"]["id"]
-    assert solo["LeadVox"]["guess_gender"] == "F"
+    assert solo["LeadVox"]["guess_gender"] is None  # 300 Hz: pitch cannot tell
     assert solo["LeadVox"]["guess_singer"] == "solo artist"
     assert len(solo["LeadVox"]["snippets"]) == 3
     assert all(0 < d <= identity.SNIPPET_SEC for _, d in solo["LeadVox"]["snippets"])
 
     duet = {t["track"]: t for t in cards["SomeBand_Duet_Full"]["tracks"]}
-    assert duet["LeadVox1"]["guess_singer"] == "some band-m"
-    assert duet["LeadVox2"]["guess_singer"] == "some band-f"
+    # one pitch verdict (M) and one open: no split is suggested until the reviewer says so
+    assert duet["LeadVox1"]["guess_gender"] == "M" and duet["LeadVox2"]["guess_gender"] is None
+    assert duet["LeadVox1"]["guess_singer"] == duet["LeadVox2"]["guess_singer"] == "some band"
     assert (data_root / identity.SNIPPET_CACHE).exists()
     assert not solo["LeadVox"]["harsh"]["likely"]
     assert cards["LoudBand_Scream_Full"]["tracks"][0]["harsh"]["likely"]
