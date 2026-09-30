@@ -115,6 +115,10 @@ def test_folder_names():
     ("Vocoder1", ("instrument", None)),
     ("Kick", ("instrument", None)),
     ("LeadDouble", ("unclassified", None)),
+    ("BGV 1 251_01", ("vocal", "backing")),
+    ("LVDT1", ("vocal", "lead_double")),
+    ("LV", ("vocal", "lead")),
+    ("Lvl", ("unclassified", None)),
 ])
 def test_classify_name(name, expected):
     assert classify_name(name) == expected
@@ -264,7 +268,11 @@ def test_containers_backing_stems_and_documents(tmp_path, monkeypatch):
     assert report["songs_with_lyrics_sheet"] == 1 and report["styles"] == ["Harbor Pop"]
 
 
-def test_same_take_from_an_earlier_batch_is_dropped(tmp_path):
+def test_same_take_from_an_earlier_batch_is_dropped(tmp_path, monkeypatch):
+    """...and the later export's sheets reach the earlier take, which sings them."""
+    from signalml.ingest import sheets
+
+    monkeypatch.setattr(sheets, "pdf_text", lambda p: open(p, encoding="utf-8").read())
     lead, other = _voice(230, 50), _voice(260, 51)
     first = tmp_path / "b1"
     _write(first / "SomeBand_Lantern_Full" / "01_LeadVox.wav", lead)
@@ -272,8 +280,11 @@ def test_same_take_from_an_earlier_batch_is_dropped(tmp_path):
     second = tmp_path / "b2"
     # a later export of the same song by the same band (a featuring credit on the name):
     # its guide vocal is the very same take; a different song's guide vocal is not
-    _write(second / "SomeBandFeatGuest_Lantern_BackingStems" / "Lantern_Stems_06_GydVox.wav",
-           lead * 0.8)
+    later = second / "SomeBandFeatGuest_Lantern_BackingStems"
+    _write(later / "Lantern_Stems_06_GydVox.wav", lead * 0.8)
+    (later / "SomeBand_Lantern_CompSheet.pdf").write_text(
+        "Some Band: Lantern\nVERSE 1\nWe row until the dawn\n", encoding="utf-8")
+    (later / "meta.txt").write_text("Style: Harbor Pop\n", encoding="utf-8")
     _write(second / "SomeBand_Harbor_BackingStems" / "Harbor_Stems_06_GydVox.wav", other)
 
     root = tmp_path / "dr"
@@ -285,3 +296,7 @@ def test_same_take_from_an_earlier_batch_is_dropped(tmp_path):
     assert not dup["keep"] and dup["duplicate_of"] == first_new[0].id
     assert plans["SomeBand_Harbor_BackingStems"]["tracks"][0]["keep"]
     assert len(second_new) == 1
+    earlier = manifest.get(first_new[0].id)
+    assert earlier.meta.has_lyrics and earlier.meta.genre == "harbor pop"
+    lyrics = (root / earlier.meta.lyrics_path).read_text(encoding="utf-8")
+    assert lyrics == "We row until the dawn\n"

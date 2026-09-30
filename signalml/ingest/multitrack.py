@@ -87,7 +87,8 @@ PHAT_BIN_FLOOR = 1e-3  # bins 60 dB below a signal's peak carry no phase informa
 DUP_CORR = 0.5
 N_WINDOWS, WINDOW_SEC = 3, 10.0
 
-VOICE = re.compile(r"vox|vocal|voice|choir|singer|singing|harmon|adlib|\bbv\b|whisper", re.I)
+VOICE = re.compile(r"vox|vocal|voice|choir|singer|singing|harmon|adlib|\bbv\b|bgv|whisper|"
+                   r"^lv(?=dt|\d|$)", re.I)
 NOT_VOICE = re.compile(r"gtr|guitar|perc|vocoder", re.I)  # ElecGtrDT, PercChoir, Vocoder1
 INSTRUMENT = re.compile(
     r"kick|snare|hi.?hat|\bhh\b|tom|overhead|\boh\b|room|drum|cymb|ride|crash|bass|gtr|"
@@ -204,9 +205,9 @@ def classify_name(name: str) -> tuple[str, str | None]:
     """(kind, role) from a track name alone."""
     if VOICE.search(name) and not NOT_VOICE.search(name):
         low = name.lower()
-        if re.search(r"lead|\bld\b", low):
+        if re.search(r"lead|\bld\b|^lv", low):
             role = "lead"
-        elif re.search(r"backing|\bbg\b|\bbv\b|harmon", low):
+        elif re.search(r"backing|\bbg\b|\bbv\b|bgv|harmon", low):
             role = "backing"
         else:
             role = "vocal"
@@ -520,6 +521,38 @@ def _write_song_documents(data_root: Path, song_raw: Path, fp: FolderPlan) -> di
     return out
 
 
+def _same_song_records(data_root: Path, manifest: Manifest, fp: FolderPlan,
+                       batch: str) -> list[tuple[ManifestRecord, str]]:
+    """Main-vocal records of this song imported from other batches - by duplicate link
+    (a dropped take that *is* an earlier recording) or by artist and song name - so a
+    later export's sheets reach the takes that sing them. ``(record, role)`` pairs."""
+    linked = {_folder_of(data_root, t.duplicate_of) for t in fp.tracks
+              if t.duplicate_of and t.duplicate_of.startswith("sng_")} - {None}
+    out = []
+    for rec in manifest.records:
+        if rec.meta.corpus != CORPUS:
+            continue
+        path = song_dir(data_root, rec.id) / "analysis.json"
+        analysis = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        info = analysis.get("separate", {}).get("multitrack", {})
+        if not info or info.get("batch") == batch or info.get("role") not in MAIN_ROLES:
+            continue
+        same_name = (bool(fp.song and info.get("song"))
+                     and _artist_match(info.get("artist", ""), fp.artist)
+                     and _song_key(info["song"]) == _song_key(fp.song))
+        if same_name or info["folder"] in linked:
+            out.append((rec, info["role"]))
+    return out
+
+
+def _folder_of(data_root: Path, rec_id: str) -> str | None:
+    path = song_dir(data_root, rec_id) / "analysis.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8")).get("separate", {}) \
+        .get("multitrack", {}).get("folder")
+
+
 def _attach_documents(data_root: Path, rec: ManifestRecord, t: TrackDecision,
                       docs: list[str], song_meta: dict) -> None:
     """Genre for every track; official lyrics for the ones that sing them (main roles -
@@ -574,7 +607,9 @@ def import_multitrack(
 
     by_path = {r.file.path: r for r in manifest.records}
     for fp in plans:
-        if not fp.kept:
+        earlier_song = _same_song_records(data_root, manifest, fp, batch) \
+            if (fp.docs and (fp.sheets or fp.style)) else []
+        if not fp.kept and not earlier_song:
             continue
         docs = []
         for doc in map(Path, fp.docs):
@@ -584,6 +619,10 @@ def import_multitrack(
                 shutil.copyfile(doc, ddst)
             docs.append(ddst.relative_to(data_root).as_posix())
         song_meta = _write_song_documents(data_root, raw_dir / short_name(fp.folder), fp)
+        for rec, role in earlier_song:  # a later export's sheets for takes imported before
+            _attach_documents(data_root, rec, TrackDecision(track="", path="", kind="vocal",
+                                                            role=role), docs, song_meta)
+            manifest.upsert(rec)
         for t in fp.kept:
             src = Path(t.path)
             dst = raw_dir / short_name(fp.folder) / src.name
