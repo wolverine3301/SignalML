@@ -135,7 +135,8 @@ def test_validate_label():
 
 def test_apply_writes_manifest_and_is_idempotent(data_root):
     store = identity.LabelStore(data_root)
-    store.append([{"id": "sng_9003", "gender": "M", "singer": "some band-m", "flags": []}])
+    store.append([{"id": "sng_9003", "gender": "M", "singer": "some band-m",
+                   "flags": ["wordless"]}])
     store.append([{"id": "sng_9004", "gender": "F", "singer": "some band-f",
                    "flags": ["not_english", "harsh"]}])
     store.append([{"id": "sng_9000", "gender": "F", "singer": "wrong", "flags": []}])
@@ -151,6 +152,7 @@ def test_apply_writes_manifest_and_is_idempotent(data_root):
     m = Manifest.for_data_root(data_root)
     assert (m.get("sng_9003").meta.gender, m.get("sng_9003").meta.singer,
             m.get("sng_9003").meta.language) == ("M", "some band-m", "en")
+    assert m.get("sng_9003").meta.excluded is None  # wordless singing stays in
     assert m.get("sng_9004").meta.language == "und"
     assert m.get("sng_9004").meta.excluded == "harsh"  # screams: out of training, kept
     assert (m.get("sng_9000").meta.singer, m.get("sng_9000").meta.excluded) \

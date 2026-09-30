@@ -44,6 +44,9 @@ FLAGS = {
     # aligner or the acoustic model. Excluded, not discarded - a style-aware model may
     # want them later, and re-labelling + `review apply` brings a track back.
     "harsh": "mostly harsh vocals (screams, growls, distorted fry) - sung grit is fine",
+    # oohs/aahs are singing and stay in: the flag only tells the lyrics step not to expect
+    # words (Whisper hears nothing, which is right, not a failed transcription)
+    "wordless": "sung without words throughout (oohs, aahs) - still singing, kept",
 }
 EXCLUDING_FLAGS = ("bad_take", "not_singing", "harsh")
 N_SNIPPETS, SNIPPET_SEC, MAX_SNIPPET_SEC = 3, 6.0, 15.0
