@@ -35,9 +35,13 @@ FLAGS = {
     "not_lead": "not the lead singer",
     "not_english": "not sung in English",
     "bad_take": "bad take (noise, clipping, mistakes)",
-    "not_singing": "not singing (talk, effects, silence)",
+    "not_singing": "not singing (talk, whisper, effects, silence)",
+    # screams, growls, fry/distorted delivery: no stable pitch for F0 extraction, the
+    # aligner or the acoustic model. Excluded, not discarded - a style-aware model may
+    # want them later, and re-labelling + `review apply` brings a track back.
+    "harsh": "mostly harsh vocals (screams, growls, distorted fry) - sung grit is fine",
 }
-EXCLUDING_FLAGS = ("bad_take", "not_singing")
+EXCLUDING_FLAGS = ("bad_take", "not_singing", "harsh")
 N_SNIPPETS, SNIPPET_SEC, MAX_SNIPPET_SEC = 3, 6.0, 15.0
 M_BELOW_HZ, F_ABOVE_HZ = 200.0, 250.0  # between: tenors and altos overlap, no guess
 SNIPPET_PEAK = 10 ** (-3 / 20)  # snippets are peak-normalised to -3 dBFS for listening
