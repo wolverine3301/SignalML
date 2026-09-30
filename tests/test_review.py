@@ -191,3 +191,29 @@ def test_server_round_trip(data_root):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_singer_ids_follow_the_chosen_genders():
+    """One singer per artist unless the reviewer marked both genders; the pitch-guess
+    split a reviewer confirmed by accident is undone, typed names are kept."""
+    labels = {
+        "1": {"gender": "M", "singer": "band a-f"},    # accepted a wrong -f pre-fill
+        "2": {"gender": "M", "singer": "band a"},
+        "3": {"gender": "M", "singer": "Their Real Name"},
+        "4": {"gender": "F", "singer": "band b"},      # band b has both genders...
+        "5": {"gender": "M", "singer": "band b-f"},
+        "6": {"gender": None, "singer": "band b"},     # ...unknown gender: left alone
+    }
+    base_of = {"1": "band a", "2": "band a", "3": "band a", "4": "band b", "5": "band b",
+               "6": "band b"}
+    assert identity.consistent_singers(labels, base_of) == {
+        "1": "band a", "2": "band a", "3": "their real name",
+        "4": "band b-f", "5": "band b-m", "6": "band b"}
+
+
+def test_apply_makes_singer_ids_consistent(data_root):
+    store = identity.LabelStore(data_root)
+    store.append([{"id": "sng_9000", "gender": "F", "singer": "solo artist", "flags": []},
+                  {"id": "sng_9001", "gender": "F", "singer": "solo artist-f", "flags": []}])
+    manifest, _ = identity.apply_labels(data_root)
+    assert manifest.get("sng_9001").meta.singer == "solo artist"

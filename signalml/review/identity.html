@@ -141,6 +141,7 @@ function open(i) {
   cur = i; stop();
   const c = data.cards[i];
   rows = c.tracks.map(stateFor); focus = 0;
+  suggestSingers();
   const card = $("#card");
   card.innerHTML = `<h2>${esc(c.artist)}</h2>
     <div class="sub">${esc(c.song)} · ${c.tracks.length} main vocal track${c.tracks.length > 1 ? "s" : ""} · <span class="chip">${esc(c.batch)}</span></div>
@@ -192,7 +193,20 @@ function drawRows() {
 }
 
 function markFocus() { [...$("#rows").children].forEach((el, k) => el.classList.toggle("focus", k === focus)); }
-function setGender(k, g) { rows[k].gender = g; rows[k].genderGuessed = false; drawRows(); }
+function setGender(k, g) { rows[k].gender = g; rows[k].genderGuessed = false; suggestSingers(); drawRows(); }
+
+// One singer per song unless it pairs a male and a female voice: untouched singer boxes
+// follow the genders on screen, and the artist's earlier answers (a band already split
+// into -f/-m stays split). `review apply` enforces the same rule across the whole artist.
+function suggestSingers() {
+  const c = data.cards[cur];
+  const base = (c.artist || c.folder).toLowerCase();
+  const own = rows.filter(r => !(r.isDouble && r.same)).map(r => r.gender).filter(Boolean);
+  const split = new Set(own).size > 1 ||
+    c.known_singers.some(s => s === base + "-f" || s === base + "-m");
+  for (const r of rows)
+    if (r.singerGuessed) r.singer = split && r.gender ? `${base}-${r.gender.toLowerCase()}` : base;
+}
 
 function play(k, j) {
   const t = rows[k].t, s = t.snippets[j];

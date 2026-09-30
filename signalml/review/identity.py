@@ -164,6 +164,48 @@ def _main_vocal_records(manifest: Manifest, data_root: Path):
             yield rec, info
 
 
+def _artist_names(records) -> dict[str, str]:
+    """artist_key -> display name, from the spelling with the most capitals (it splits
+    into the most readable words)."""
+    spelling: dict[str, str] = {}
+    for _, info in records:
+        name = info.get("artist") or ""
+        k = artist_key(name)
+        if sum(c.isupper() for c in name) > sum(c.isupper() for c in spelling.get(k, "")):
+            spelling[k] = name
+    return {k: display_name(v) for k, v in spelling.items()}
+
+
+def singer_base(info: dict, names: dict[str, str]) -> str:
+    """The default singer id of a track: its artist, lowercased."""
+    return (names.get(artist_key(info.get("artist") or "")) or info["folder"]).lower()
+
+
+def consistent_singers(labels: dict[str, dict], base_of: dict[str, str]) -> dict[str, str | None]:
+    """Singer ids that follow the genders the reviewer chose, per artist.
+
+    A song has one singer unless it pairs a male and a female voice (what review of a
+    first batch showed). So for ids that are the artist default (``base``, ``base-f``,
+    ``base-m``): an artist whose confirmed tracks are all one gender gets one id; an
+    artist with both genders gets ``base-f`` / ``base-m`` by each track's gender - in
+    every song, whichever order they were reviewed in. Typed names are kept as typed.
+    """
+    genders: dict[str, set[str]] = {}
+    for rid, lab in labels.items():
+        if rid in base_of and lab.get("gender"):
+            genders.setdefault(base_of[rid], set()).add(lab["gender"])
+    out: dict[str, str | None] = {}
+    for rid, lab in labels.items():
+        singer, base = _normalize_singer(lab.get("singer")), base_of.get(rid)
+        if base and singer in (base, f"{base}-f", f"{base}-m"):
+            if len(genders.get(base, ())) <= 1:
+                singer = base
+            elif lab.get("gender"):
+                singer = f"{base}-{lab['gender'].lower()}"
+        out[rid] = singer
+    return out
+
+
 def build_cards(data_root: str | Path) -> dict:
     """The review queue: one card per song, main vocal tracks with guesses + answers."""
     data_root = Path(data_root)
@@ -173,20 +215,14 @@ def build_cards(data_root: str | Path) -> dict:
     n_snips, n_harsh = len(snips), len(harsh)
 
     records = list(_main_vocal_records(manifest, data_root))
-    # the spelling with the most capitals splits into the most readable display name
-    spelling: dict[str, str] = {}
-    for _, info in records:
-        name = info.get("artist") or ""
-        k = artist_key(name)
-        if sum(c.isupper() for c in name) > sum(c.isupper() for c in spelling.get(k, "")):
-            spelling[k] = name
+    names = _artist_names(records)
 
     songs: dict[tuple[str, str], dict] = {}
     for rec, info in records:
         key = (info.get("batch") or "", info["folder"])
         card = songs.setdefault(key, {
             "key": f"{key[0]}/{key[1]}", "batch": key[0], "folder": key[1],
-            "artist": display_name(spelling.get(artist_key(info.get("artist") or ""), "")),
+            "artist": names.get(artist_key(info.get("artist") or ""), ""),
             "song": display_name(info.get("song") or "")
             or f"untitled ({key[1].split('_')[0]})", "tracks": []})
         f0 = info.get("f0_median_hz")
@@ -267,15 +303,20 @@ def apply_labels(
     """
     data_root = Path(data_root)
     manifest = Manifest.for_data_root(data_root)
+    labels = LabelStore(data_root).load()
+    records = list(_main_vocal_records(manifest, data_root))
+    names = _artist_names(records)
+    base_of = {rec.id: singer_base(info, names) for rec, info in records}
+    singers = consistent_singers(labels, base_of)
     changed: list[tuple[str, dict]] = []
-    for rid, label in sorted(LabelStore(data_root).load().items()):
+    for rid, label in sorted(labels.items()):
         rec = manifest.get(rid)
         if rec is None:
             continue
         flags = set(label.get("flags") or [])
         new = {
             "gender": label.get("gender"),
-            "singer": _normalize_singer(label.get("singer")),
+            "singer": singers[rid],
             "language": "und" if "not_english" in flags else "en",
             "excluded": ", ".join(f for f in EXCLUDING_FLAGS if f in flags) or None,
         }
