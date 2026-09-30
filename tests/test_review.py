@@ -174,6 +174,8 @@ def test_server_round_trip(data_root):
         tid = payload["cards"][0]["tracks"][0]["id"]
         audio = urllib.request.urlopen(f"{base}/audio/{tid}?s=0&d=1").read()
         assert audio[:4] == b"RIFF"
+        full, sr = sf.read(io.BytesIO(urllib.request.urlopen(f"{base}/audio/{tid}/full").read()))
+        assert sr == identity.FULL_SR and len(full) == pytest.approx(20 * sr, abs=sr // 10)
 
         def post(body: dict) -> int:
             req = urllib.request.Request(f"{base}/api/identity/labels",

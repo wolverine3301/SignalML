@@ -308,6 +308,27 @@ def snippet_wav(data_root: str | Path, rec_id: str, start: float, dur: float) ->
     return buf.getvalue()
 
 
+FULL_SR = 22050  # full-track listening copy: a 4-minute take is ~10 MB, scrubs instantly
+
+
+def full_track_wav(data_root: str | Path, rec_id: str) -> bytes:
+    """The whole vocal track as one listening copy (mono 22.05 kHz 16-bit, peak -3 dBFS),
+    for voices three short snippets cannot settle."""
+    from scipy.signal import resample_poly
+
+    if not re.fullmatch(r"sng_\d+", rec_id):
+        raise ValueError(f"bad record id {rec_id!r}")
+    y, sr = sf.read(str(song_dir(data_root, rec_id) / "stems" / "vocals.wav"),
+                    dtype="float32", always_2d=True)
+    y = resample_poly(y.mean(axis=1), FULL_SR, sr).astype(np.float32)
+    peak = float(np.max(np.abs(y))) if len(y) else 0.0
+    if peak > 0:
+        y = y * min(SNIPPET_PEAK / peak, MAX_GAIN)
+    buf = io.BytesIO()
+    sf.write(buf, y, FULL_SR, format="WAV", subtype="PCM_16")
+    return buf.getvalue()
+
+
 def apply_labels(
     data_root: str | Path, *, dry_run: bool = False
 ) -> tuple[Manifest, list[tuple[str, dict]]]:

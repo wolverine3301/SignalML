@@ -52,6 +52,8 @@ section.card { padding: 20px 28px 40px; max-width: 1100px; }
 .snips button, .seg button { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
   border-radius: 7px; padding: 5px 0; width: 34px; cursor: pointer; font: inherit; font-variant-numeric: tabular-nums; }
 .snips button.playing { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.snips button.full { width: auto; padding: 5px 8px; }
+.fullplayer { grid-column: 1 / -1; width: 100%; }
 .seg button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .seg button.guess { border-style: dashed; color: var(--guess); }
 .who { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
@@ -151,7 +153,7 @@ function open(i) {
     <div id="rows"></div>
     <div class="actions"><button class="primary" id="confirm">Confirm &amp; next</button>
       <span id="msg"></span></div>
-    <p class="keys"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> play · <kbd>Space</kbd> stop · <kbd>F</kbd>/<kbd>M</kbd>/<kbd>U</kbd> gender ·
+    <p class="keys"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> play · <kbd>4</kbd> full track · <kbd>Space</kbd> stop · <kbd>F</kbd>/<kbd>M</kbd>/<kbd>U</kbd> gender ·
       <kbd>↑</kbd><kbd>↓</kbd> track · <kbd>S</kbd> singer box · <kbd>Enter</kbd> confirm · <kbd>←</kbd><kbd>→</kbd> song</p>`;
   $("#confirm").onclick = confirm;
   drawRows(); renderList();
@@ -172,7 +174,7 @@ function drawRows() {
       : "";
     el.innerHTML = `
       <div class="t"><b>${esc(t.track)}</b><span class="chip">${esc(t.role.replace("_", " "))}</span> <span>${f0} · ${Math.round(t.sung_sec || 0)} s sung</span>${harshNote}</div>
-      <div class="snips">${t.snippets.map((s, j) => `<button data-j="${j}" title="${s[0].toFixed(0)} s">${j + 1}</button>`).join("")}</div>
+      <div class="snips">${t.snippets.map((s, j) => `<button data-j="${j}" title="${s[0].toFixed(0)} s">${j + 1}</button>`).join("")}<button class="full" title="the whole track, to scrub through (key 4)">full</button></div>
       <div class="seg">${["F", "M", null].map(g => `<button data-g="${g}" class="${r.gender === g ? (r.genderGuessed ? "on guess" : "on") : ""}">${g || "?"}</button>`).join("")}</div>
       <div class="who">
         <input type="text" list="singers" placeholder="singer" value="${esc(r.singer)}" class="${r.singerGuessed ? "guess" : ""}">
@@ -181,7 +183,8 @@ function drawRows() {
           `<label title="${esc(title)}" class="${r.flags.has(f) ? "on" : ""}"><input type="checkbox" data-f="${f}" ${r.flags.has(f) ? "checked" : ""} hidden>${esc(f.replace("_", " "))}</label>`).join("")}</span>
       </div>`;
     el.onclick = () => { if (focus !== k) { focus = k; markFocus(); } };
-    el.querySelectorAll(".snips button").forEach(b => b.onclick = e => { e.stopPropagation(); play(k, +b.dataset.j); });
+    el.querySelectorAll(".snips button[data-j]").forEach(b => b.onclick = e => { e.stopPropagation(); play(k, +b.dataset.j); });
+    $(".snips .full", el).onclick = e => { e.stopPropagation(); openFull(k); };
     el.querySelectorAll(".seg button").forEach(b => b.onclick = () => setGender(k, b.dataset.g === "null" ? null : b.dataset.g));
     const inp = $("input[type=text]", el);
     inp.oninput = () => { r.singer = inp.value; r.singerGuessed = false; inp.classList.remove("guess"); };
@@ -217,7 +220,22 @@ function play(k, j) {
   player.play();
   playing = [k, j]; paintPlaying();
 }
-function stop() { player.pause(); playing = null; paintPlaying(); }
+function stop() {
+  player.pause(); playing = null; paintPlaying();
+  document.querySelectorAll(".fullplayer").forEach(a => a.pause());
+}
+function openFull(k) {
+  stop(); focus = k; markFocus();
+  const row = $("#rows").children[k];
+  let a = $(".fullplayer", row);
+  if (!a) {
+    a = document.createElement("audio");
+    a.className = "fullplayer"; a.controls = true; a.preload = "auto";
+    a.src = `/audio/${rows[k].t.id}/full`;
+    row.appendChild(a);
+  }
+  a.play();
+}
 player.onended = () => { playing = null; paintPlaying(); };
 function paintPlaying() {
   document.querySelectorAll(".snips button").forEach(b => b.classList.remove("playing"));
@@ -264,6 +282,7 @@ document.addEventListener("keydown", e => {
   else if (k === "arrowright") { const v = visible().map(x => x[1]); const n = v.find(i => i > cur); if (n !== undefined) open(n); }
   else if (k === "arrowleft") { const v = visible().map(x => x[1]).reverse(); const n = v.find(i => i < cur); if (n !== undefined) open(n); }
   else if (["1", "2", "3"].includes(k)) play(focus, +k - 1);
+  else if (k === "4") openFull(focus);
   else if (k === " ") { e.preventDefault(); playing ? stop() : play(focus, 0); }
   else if (k === "f") setGender(focus, "F");
   else if (k === "m") setGender(focus, "M");

@@ -17,6 +17,7 @@ from . import identity
 
 MAX_BODY_BYTES = 1 << 20
 _AUDIO = re.compile(r"^/audio/(sng_\d+)$")
+_FULL = re.compile(r"^/audio/(sng_\d+)/full$")
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -36,6 +37,13 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 wav = identity.snippet_wav(self.server.data_root, m.group(1),
                                            float(q.get("s", ["0"])[0]), float(q.get("d", ["6"])[0]))
+            except (ValueError, OSError) as exc:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send(HTTPStatus.OK, "audio/wav", wav)
+        elif (m := _FULL.match(url.path)) is not None:
+            try:
+                wav = identity.full_track_wav(self.server.data_root, m.group(1))
             except (ValueError, OSError) as exc:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
