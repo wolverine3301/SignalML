@@ -225,3 +225,63 @@ def test_dry_run_copies_nothing(session_root, tmp_path):
     manifest, new, report = import_multitrack(root, root=session_root, batch="b", dry_run=True)
     assert new == [] and len(manifest) == 0 and report["kept_tracks"] == 5
     assert not (root / "songs").exists()
+
+
+def test_containers_backing_stems_and_documents(tmp_path, monkeypatch):
+    """Genre shelves are containers; a _BackingStems export's guide vocal is named from
+    its file; the session's sheets become official lyrics, genre and structure."""
+    from signalml.ingest import sheets
+
+    monkeypatch.setattr(sheets, "pdf_text", lambda p: open(p, encoding="utf-8").read())
+    batch = tmp_path / "b5"
+    song = batch / "pop" / "SomeBand_Lantern_BackingStems"
+    _write(song / "Lantern_Stems_01_Drums.wav", _drums(40))
+    _write(song / "Lantern_Stems_06_GydVox.wav", _voice(240, 41))
+    (song / "SomeBand_Lantern_CompSheet.pdf").write_text(
+        "Some Band: Lantern\nVERSE 1\nWe row until the dawn\nCHORUS 1\nOh lantern\n",
+        encoding="utf-8")
+    (song / "SomeBand_Lantern_CueSheet.pdf").write_text(
+        "Some Band: Lantern\n(A minor, 4/4, 100bpm)\nTime Bars Section Notes\n0:05 4 Verse 1a\n",
+        encoding="utf-8")
+    (song / "meta.txt").write_text("Style: Harbor Pop\n", encoding="utf-8")
+
+    root = tmp_path / "dr"
+    manifest, new, report = import_multitrack(root, root=batch, batch="b5")
+    manifest.save()
+    plan = report["plans"][0]
+    assert (plan["folder"], plan["container"], plan["artist"], plan["song"]) == \
+        ("SomeBand_Lantern_BackingStems", "pop", "SomeBand", "Lantern")
+    assert [t["track"] for t in plan["tracks"] if t["keep"]] == ["GydVox"]
+    rec = Manifest.for_data_root(root).get(new[0].id)
+    assert rec.meta.genre == "harbor pop" and rec.meta.has_lyrics
+    assert rec.meta.lyrics_source is None  # official lyrics take the human-lyrics path
+    assert (root / rec.meta.lyrics_path).read_text(encoding="utf-8") == \
+        "We row until the dawn\nOh lantern\n"
+    structure = json.loads((song_dir(root, rec.id) / "analysis.json")
+                           .read_text(encoding="utf-8"))["song_structure"]
+    assert (structure["key"], structure["bpm"], structure["sections"]) == \
+        ("A minor", [100.0], ["VERSE 1", "CHORUS 1"])
+    assert report["songs_with_lyrics_sheet"] == 1 and report["styles"] == ["Harbor Pop"]
+
+
+def test_same_take_from_an_earlier_batch_is_dropped(tmp_path):
+    lead, other = _voice(230, 50), _voice(260, 51)
+    first = tmp_path / "b1"
+    _write(first / "SomeBand_Lantern_Full" / "01_LeadVox.wav", lead)
+    _write(first / "SomeBand_Lantern_Full" / "02_Kick.wav", _drums(52))
+    second = tmp_path / "b2"
+    # a later export of the same song by the same band (a featuring credit on the name):
+    # its guide vocal is the very same take; a different song's guide vocal is not
+    _write(second / "SomeBandFeatGuest_Lantern_BackingStems" / "Lantern_Stems_06_GydVox.wav",
+           lead * 0.8)
+    _write(second / "SomeBand_Harbor_BackingStems" / "Harbor_Stems_06_GydVox.wav", other)
+
+    root = tmp_path / "dr"
+    manifest, first_new, _ = import_multitrack(root, root=first, batch="b1")
+    manifest.save()
+    manifest, second_new, report = import_multitrack(root, root=second, batch="b2")
+    plans = {p["folder"]: p for p in report["plans"]}
+    dup = plans["SomeBandFeatGuest_Lantern_BackingStems"]["tracks"][0]
+    assert not dup["keep"] and dup["duplicate_of"] == first_new[0].id
+    assert plans["SomeBand_Harbor_BackingStems"]["tracks"][0]["keep"]
+    assert len(second_new) == 1

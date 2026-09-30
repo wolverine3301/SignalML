@@ -33,6 +33,15 @@ Decisions, in order:
   - *same take on several mics*: waveform correlation above ``DUP_CORR`` with a track
     already kept (0.9+ for mic pairs; a double-tracked second performance is ~0.1).
 
+Layout: song folders may sit directly under the batch folder or one level down in a
+*container* folder (``pop/``, ``country rock/``) whose name is kept as a genre hint.
+Session documents are read (:mod:`.sheets`): a ``meta.txt`` style becomes the genre,
+a composition sheet's lyrics become the main vocals' ``lyrics.txt`` (official lyrics,
+so these songs take the human-lyrics path), and the sections, key, tempo and cue times
+go to ``song_structure.json``. A vocal that is the same recording as a track imported
+from an earlier batch (same artist, audio correlation above ``DUP_CORR``) is dropped:
+a ``_BackingStems`` export's guide vocal is often the ``_Full`` session's lead take.
+
 Identity is NOT taken from folder names: a band has several singers and backing parts
 are often someone else. Records land with ``singer`` and ``gender`` unset - dataset
 build refuses such records - until a voice-embedding pass assigns both. A median-F0
@@ -62,6 +71,7 @@ from ..manifest import (
 )
 from ..stages.common import song_dir, update_analysis
 from .batch import short_name
+from .sheets import lyrics_text, read_session_docs
 
 CORPUS = "multitrack"
 
@@ -97,7 +107,8 @@ DROP_BY_NAME: tuple[tuple[re.Pattern, str], ...] = (
     (re.compile(r"choir", re.I), "choir: a group of voices, no single singer"),
 )
 EXCERPT_OF = "_full"
-FOLDER_SUFFIX = re.compile(r"_(full|stems)$", re.I)
+FOLDER_SUFFIX = re.compile(r"_(full|stems|backingstems)$", re.I)
+MAIN_ROLES = frozenset({"lead", "lead_double", "vocal", "vocal_double"})  # sing the lyrics
 # documents a session ships beside its audio: lyrics, lead sheets, notes, MIDI. Kept with
 # the imported tracks so the lyrics step (and later work) can use them.
 DOC_SUFFIXES = frozenset({".txt", ".rtf", ".pdf", ".doc", ".docx", ".odt", ".mid", ".midi",
@@ -124,6 +135,9 @@ class FolderPlan:
     skip_reason: str = ""
     tracks: list[TrackDecision] = field(default_factory=list)
     docs: list[str] = field(default_factory=list)  # source paths of session documents
+    container: str | None = None  # the folder it sat in (a genre hint), if any
+    style: str | None = None  # meta.txt "Style:" if the session has one
+    sheets: list[str] = field(default_factory=list)  # "comp" / "cue" present
 
     @property
     def kept(self) -> list[TrackDecision]:
@@ -134,7 +148,8 @@ class FolderPlan:
         return cls(folder=d["folder"], artist=d["artist"], song=d.get("song"),
                    skip_reason=d.get("skip_reason", ""),
                    tracks=[TrackDecision(**t) for t in d.get("tracks", [])],
-                   docs=list(d.get("docs", [])))
+                   docs=list(d.get("docs", [])), container=d.get("container"),
+                   style=d.get("style"), sheets=list(d.get("sheets", [])))
 
 
 def parse_folder_name(name: str) -> tuple[str, str | None]:
@@ -149,11 +164,29 @@ def parse_folder_name(name: str) -> tuple[str, str | None]:
 
 
 def track_name(path: Path) -> str:
-    return re.sub(r"^\d+[\s_-]*", "", path.stem).strip()
+    """``03_LeadVox`` -> ``LeadVox``; ``ImAlright_Stems_06_GydVox`` -> ``GydVox``."""
+    return re.sub(r"^(?:.+?_stems_)?\d+[\s_-]*", "", path.stem, flags=re.I).strip()
 
 
 def _is_junk(path: Path) -> bool:
     return "__MACOSX" in path.parts or path.name.startswith("._")
+
+
+def song_folders(root: Path) -> list[tuple[Path, str | None]]:
+    """``(song_folder, container)`` for every song under ``root``: a folder named like a
+    session (``_Full``/``_Stems``/``_BackingStems``) or holding WAVs itself is a song;
+    any other folder is a container (a genre shelf) and is searched one level down."""
+    out: list[tuple[Path, str | None]] = []
+    for d in sorted(p for p in root.iterdir() if p.is_dir() and not _is_junk(p)):
+        if FOLDER_SUFFIX.search(d.name) or any(
+                f.suffix.lower() == ".wav" and not _is_junk(f) for f in d.iterdir()):
+            out.append((d, None))
+            continue
+        for sub in sorted(p for p in d.iterdir() if p.is_dir() and not _is_junk(p)):
+            if FOLDER_SUFFIX.search(sub.name) or any(
+                    f.suffix.lower() == ".wav" and not _is_junk(f) for f in sub.rglob("*.wav")):
+                out.append((sub, d.name))
+    return out
 
 
 def session_docs(folder: Path) -> list[Path]:
@@ -281,8 +314,10 @@ def _f0_median(y: np.ndarray, sung_mask: np.ndarray, hop: int = 400) -> float | 
     return round(float(np.median(voiced)), 1) if len(voiced) > 20 else None
 
 
-def plan_folder(folder: Path, *, siblings: set[str] | None = None) -> FolderPlan:
-    """Decide every track of one song folder. Reads audio (8 kHz analysis copies)."""
+def plan_folder(folder: Path, *, siblings: set[str] | None = None,
+                earlier: list[dict] | None = None) -> FolderPlan:
+    """Decide every track of one song folder. Reads audio (8 kHz analysis copies).
+    ``earlier``: already-imported tracks of the same artist (see :func:`earlier_takes`)."""
     artist, song = parse_folder_name(folder.name)
     plan = FolderPlan(folder=folder.name, artist=artist, song=song,
                       docs=[str(p) for p in session_docs(folder)])
@@ -362,27 +397,75 @@ def plan_folder(folder: Path, *, siblings: set[str] | None = None) -> FolderPlan
                 break
         if t.reason:
             continue
+        for prev in earlier or []:
+            dup = max(_xcorr(y[a:b], prev["audio"][a:b], 80) for a, b in wins)
+            if dup > DUP_CORR:
+                t.reason = (f"same take as {prev['id']} ({prev['folder']}:{prev['track']}), "
+                            f"imported earlier (corr {dup:.2f})")
+                t.duplicate_of = prev["id"]
+                break
+        if t.reason:
+            continue
         t.stats["f0_median_hz"] = _f0_median(y, sung_mask)
         t.keep = True
         kept.append((t, y))
     return plan
 
 
-def plan_batch(root: str | Path, *, reuse: dict[str, dict] | None = None) -> list[FolderPlan]:
+def _song_key(song: str | None) -> str:
+    return re.sub(r"[^a-z0-9]", "", (song or "").lower())
+
+
+def _artist_match(a: str, b: str) -> bool:
+    """Same artist, allowing a featuring credit: ``Triviul`` vs ``TriviulFeatTheFiend``."""
+    a, b = _song_key(a), _song_key(b)
+    return a == b or (min(len(a), len(b)) >= 5 and (a.startswith(b) or b.startswith(a)))
+
+
+def earlier_takes(data_root: Path, manifest: Manifest, artist: str, song: str | None,
+                  exclude_batch: str) -> list[dict]:
+    """Imported multitrack vocals of the same artist and song (or an untitled one) from
+    other batches, with 8 kHz audio for the duplicate check."""
+    out = []
+    for rec in manifest.records:
+        if rec.meta.corpus != CORPUS:
+            continue
+        path = song_dir(data_root, rec.id) / "analysis.json"
+        info = json.loads(path.read_text(encoding="utf-8")).get("separate", {}) \
+            .get("multitrack", {}) if path.exists() else {}
+        if not info or info.get("batch") == exclude_batch \
+                or not _artist_match(info.get("artist", ""), artist):
+            continue
+        if song and info.get("song") and _song_key(info["song"]) != _song_key(song):
+            continue
+        out.append({"id": rec.id, "folder": info["folder"], "track": info["track"],
+                    "audio": _load(song_dir(data_root, rec.id) / "stems" / "vocals.wav")})
+    return out
+
+
+def plan_batch(root: str | Path, *, reuse: dict[str, dict] | None = None,
+               earlier=None) -> list[FolderPlan]:
     """Plan every song folder. Folders found in ``reuse`` (a previous report's plans,
     keyed by folder name) keep their decisions and are not read again, so a batch that
-    grows by a few folders costs only the new ones."""
+    grows by a few folders costs only the new ones. ``earlier(artist, song)`` returns
+    already-imported takes to check new vocals against (cross-batch duplicates)."""
     root = Path(root)
     reuse = reuse or {}
-    folders = sorted(p for p in root.iterdir() if p.is_dir() and not _is_junk(p))
-    names = {p.name.lower() for p in folders}
+    folders = song_folders(root)
+    names = {f.name.lower() for f, _ in folders}
     plans = []
-    for f in folders:
+    for f, container in folders:
         if f.name in reuse:
             plan = FolderPlan.from_dict(reuse[f.name])
             plan.docs = [str(p) for p in session_docs(f)]
         else:
-            plan = plan_folder(f, siblings=names)
+            artist, song = parse_folder_name(f.name)
+            plan = plan_folder(f, siblings=names,
+                               earlier=earlier(artist, song) if earlier else None)
+        plan.container = container
+        docs = read_session_docs(plan.docs)
+        plan.style = (docs.get("meta") or {}).get("style")
+        plan.sheets = [k for k in ("comp", "cue") if k in docs]
         plans.append(plan)
     return plans
 
@@ -406,8 +489,52 @@ def batch_report(plans: list[FolderPlan]) -> dict:
         "dropped_vocal_tracks_by_reason": dict(sorted(dropped.items(), key=lambda kv: -kv[1])),
         "unclassified_tracks": sorted(f"{fp.folder}:{t.track}" for fp in plans
                                       for t in fp.tracks if t.kind == "unclassified"),
+        "songs_with_lyrics_sheet": sum(1 for fp in plans if "comp" in fp.sheets and fp.kept),
+        "songs_with_cue_sheet": sum(1 for fp in plans if "cue" in fp.sheets and fp.kept),
+        "styles": sorted({fp.style or fp.container for fp in plans
+                          if fp.kept and (fp.style or fp.container)}),
         "plans": [asdict(fp) for fp in plans],
     }
+
+
+def _write_song_documents(data_root: Path, song_raw: Path, fp: FolderPlan) -> dict:
+    """Parse a session's documents once; write lyrics.txt / song_structure.json beside
+    its imported tracks. Returns what the records need (genre, lyrics, structure)."""
+    docs = read_session_docs(fp.docs)
+    out: dict = {"genre": (fp.style or fp.container or "").strip().lower() or None}
+    if "comp" in docs or "cue" in docs or fp.style:
+        song_raw.mkdir(parents=True, exist_ok=True)
+        structure = {"style": fp.style, "container": fp.container,
+                     "cue": docs.get("cue"), "comp": docs.get("comp")}
+        path = song_raw / "song_structure.json"
+        path.write_text(json.dumps(structure, indent=1, ensure_ascii=False), encoding="utf-8")
+        cue = docs.get("cue") or {}
+        out["structure"] = {"file": path.relative_to(data_root).as_posix(), "style": fp.style,
+                            "key": cue.get("key"), "meter": cue.get("meter"),
+                            "bpm": cue.get("bpm"), "sections": [
+                                s["name"] for s in (docs.get("comp") or {}).get("sections", [])]}
+    if docs.get("comp"):
+        lyr = song_raw / "lyrics.txt"
+        lyr.write_text(lyrics_text(docs["comp"]), encoding="utf-8")
+        out["lyrics_path"] = lyr.relative_to(data_root).as_posix()
+    return out
+
+
+def _attach_documents(data_root: Path, rec: ManifestRecord, t: TrackDecision,
+                      docs: list[str], song_meta: dict) -> None:
+    """Genre for every track; official lyrics for the ones that sing them (main roles -
+    a backing part sings a subset, left to the ASR/resolve path); analysis sections."""
+    sdir = song_dir(data_root, rec.id)
+    if docs:
+        update_analysis(sdir, "session_docs", {"files": docs})
+    if song_meta.get("structure"):
+        update_analysis(sdir, "song_structure", song_meta["structure"])
+    if song_meta.get("genre") and not rec.meta.genre:
+        rec.meta.genre = song_meta["genre"]
+    if song_meta.get("lyrics_path") and t.role in MAIN_ROLES and not rec.meta.has_lyrics:
+        rec.meta.has_lyrics = True
+        rec.meta.lyrics_path = song_meta["lyrics_path"]
+        rec.meta.lyrics_source = None  # the session's composition sheet: human lyrics
 
 
 def import_multitrack(
@@ -434,10 +561,11 @@ def import_multitrack(
     if report_path.exists() and not replan:
         previous = json.loads(report_path.read_text(encoding="utf-8"))
         reuse = {p["folder"]: p for p in previous["plans"]}
-    plans = plan_batch(root, reuse=reuse)
+    manifest = Manifest.for_data_root(data_root)
+    plans = plan_batch(root, reuse=reuse, earlier=lambda artist, song: earlier_takes(
+        data_root, manifest, artist, song, exclude_batch=batch))
     report = batch_report(plans)
     report["planned_now"] = sum(1 for fp in plans if fp.folder not in reuse)
-    manifest = Manifest.for_data_root(data_root)
     new_records: list[ManifestRecord] = []
     raw_dir.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=1), encoding="utf-8")
@@ -455,14 +583,13 @@ def import_multitrack(
             if not ddst.exists():
                 shutil.copyfile(doc, ddst)
             docs.append(ddst.relative_to(data_root).as_posix())
+        song_meta = _write_song_documents(data_root, raw_dir / short_name(fp.folder), fp)
         for t in fp.kept:
             src = Path(t.path)
             dst = raw_dir / short_name(fp.folder) / src.name
             rel = dst.relative_to(data_root).as_posix()
             if rel in by_path:  # imported by an earlier run: only refresh its documents
-                if docs:
-                    update_analysis(song_dir(data_root, by_path[rel].id), "session_docs",
-                                    {"files": docs})
+                _attach_documents(data_root, by_path[rel], t, docs, song_meta)
                 continue
             digest = sha256_file(src)
             if manifest.by_sha256(digest):
@@ -501,8 +628,7 @@ def import_multitrack(
                                **t.stats},
                 "date": date.today().isoformat(),
             })
-            if docs:
-                update_analysis(sdir, "session_docs", {"files": docs})
+            _attach_documents(data_root, rec, t, docs, song_meta)
             manifest.add(rec)
             by_path[rel] = rec
             new_records.append(rec)

@@ -19,6 +19,7 @@ dependencies = [
     "tqdm>=4.66",
     "yt-dlp>=2025.1.1",
     "praat-parselmouth>=0.4.7",
+    "pypdf>=6.19.0",
 ]
 
 [project.optional-dependencies]
