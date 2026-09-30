@@ -132,7 +132,8 @@ function stateFor(t) {
     t, isDouble,
     gender: L ? L.gender : t.guess_gender, genderGuessed: !L,
     singer: L ? (L.singer || "") : t.guess_singer, singerGuessed: !L,
-    flags: new Set(L ? L.flags : (t.harsh && t.harsh.likely ? ["harsh"] : [])),
+    flags: new Set(L ? [...L.flags, ...(L.recheck && t.harsh && t.harsh.likely && !L.harsh_seen ? ["harsh"] : [])]
+                     : (t.harsh && t.harsh.likely ? ["harsh"] : [])),
     same: isDouble ? (L ? !!L.same_as_lead : true) : false,
   };
 }
@@ -237,7 +238,7 @@ async function confirm() {
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labels }) });
   if (!res.ok) { $("#msg").textContent = "not saved: " + (await res.json()).error; return; }
   const c = data.cards[cur];
-  const newly = c.tracks.filter(t => !t.label).length;
+  const newly = c.tracks.filter(t => !t.label || t.label.recheck).length;
   c.tracks.forEach((t, k) => t.label = labels[k]);
   if (!c.confirmed) data.progress.confirmed++;
   data.progress.labelled += newly;

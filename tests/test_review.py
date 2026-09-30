@@ -217,3 +217,25 @@ def test_apply_makes_singer_ids_consistent(data_root):
                   {"id": "sng_9001", "gender": "F", "singer": "solo artist-f", "flags": []}])
     manifest, _ = identity.apply_labels(data_root)
     assert manifest.get("sng_9001").meta.singer == "solo artist"
+
+
+def test_reopened_tracks_are_pending_with_answers_kept(data_root):
+    store = identity.LabelStore(data_root)
+    store.append([{"id": "sng_9003", "gender": "M", "singer": "some band-m", "flags": []},
+                  {"id": "sng_9004", "gender": "F", "singer": "some band-f", "flags": []}])
+
+    def duet():
+        cards = identity.build_cards(data_root)["cards"]
+        return next(c for c in cards if c["folder"] == "SomeBand_Duet_Full")
+
+    assert duet()["confirmed"]
+    assert identity.reopen(data_root, ["sng_9003", "sng_9004"], "unsure") == 2
+    card = duet()
+    assert not card["confirmed"]
+    assert card["tracks"][0]["label"]["singer"] == "some band-m"  # kept as the pre-fill
+    # the reviewer confirms again: the fresh answer (no recheck) settles it
+    store.append([identity.validate_label({"id": "sng_9003", "gender": "M",
+                                           "singer": "some band-m"}, {"sng_9003"}),
+                  identity.validate_label({"id": "sng_9004", "gender": "F",
+                                           "singer": "some band-f"}, {"sng_9004"})])
+    assert duet()["confirmed"]

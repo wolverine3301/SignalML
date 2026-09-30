@@ -143,6 +143,19 @@ def _harsh(data_root: Path, rec_id: str, cache: dict) -> dict | None:
     return cache[rec_id]
 
 
+def _settled(label: dict | None) -> bool:
+    return bool(label) and not label.get("recheck")
+
+
+def reopen(data_root: str | Path, record_ids: list[str], note: str) -> int:
+    """Put answered tracks back in the queue: their answers stay as the pre-fill."""
+    labels = LabelStore(data_root).load()
+    rows = [{**{k: v for k, v in labels[r].items() if k != "ts"}, "recheck": True,
+             "note": note} for r in record_ids if r in labels]
+    LabelStore(data_root).append(rows)
+    return len(rows)
+
+
 def _load_cache(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
@@ -254,10 +267,11 @@ def build_cards(data_root: str | Path) -> dict:
             if t["label"] and t["label"].get("singer"):
                 singers_by_artist.setdefault(card["artist"], set()).add(t["label"]["singer"])
         card["tracks"] = tracks
-        card["confirmed"] = all(t["label"] for t in tracks)
+        # a "recheck" answer is kept as the pre-fill but the song is pending again
+        card["confirmed"] = all(_settled(t["label"]) for t in tracks)
         # confirmed before the harsh flag existed, or missed: worth a second listen
         card["harsh_warning"] = any(
-            t["label"] and (t["harsh"] or {}).get("likely")
+            _settled(t["label"]) and (t["harsh"] or {}).get("likely")
             and "harsh" not in t["label"]["flags"] and not t["label"].get("harsh_seen")
             for t in tracks)
 
@@ -270,7 +284,8 @@ def build_cards(data_root: str | Path) -> dict:
         "flags": FLAGS,
         "progress": {"songs": len(cards), "confirmed": sum(c["confirmed"] for c in cards),
                      "tracks": n_tracks,
-                     "labelled": sum(1 for c in cards for t in c["tracks"] if t["label"])},
+                     "labelled": sum(1 for c in cards for t in c["tracks"]
+                                     if _settled(t["label"]))},
     }
 
 
