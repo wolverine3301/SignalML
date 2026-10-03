@@ -629,6 +629,19 @@ class TestPhraseGate:
         s = build(root, recipe=recipe(name="nov", alignment_variant="phrase"))
         assert "'phrase' alignment" in s.skipped[sid]
 
+    def test_main_alignment_made_in_phrase_mode_is_the_variant(self, tmp_path, make_wav):
+        """`align --phrases` as a song's first alignment (multitrack imports) writes the
+        main files and records mode "phrases": a phrase recipe takes it as is."""
+        root = tmp_path / "dr"
+        sid = _ready_song(root, make_wav, phones=self.TIGHT)
+        adir = song_dir(root, sid) / "align"
+        (adir / "utterances.json").write_text(json.dumps(self.UTTS), encoding="utf-8")
+        r = recipe(name="main", alignment_variant="phrase", phrase_gate={"enabled": True})
+        assert "'phrase' alignment" in build(root, recipe=r).skipped[sid]  # whole-song
+        update_analysis(adir.parent, "align", {"mode": "phrases", "align_score": 0.95})
+        s = build(root, recipe=r, force=True)
+        assert s.songs_used == [sid] and s.gated_phrases == {"floor_frac": 1}
+
     def test_variant_score_gates_like_align_score(self, tmp_path, make_wav):
         root = tmp_path / "dr"
         sid = _ready_song(root, make_wav)
@@ -652,3 +665,17 @@ def test_min_lyrics_agreement_filters_on_the_resolution(tmp_path, make_wav):
     assert "lyrics agreement 0.42" in s.skipped[sid]
     update_analysis(song_dir(root, sid), "lyrics_resolve", {"agreement": 0.9})
     assert build(root, recipe=r, force=True).clips > 0
+
+
+def test_machine_lyrics_skip_agreement_and_ids_can_be_excluded(tmp_path, make_wav):
+    root = tmp_path / "dr"
+    sid = _ready_song(root, make_wav)
+    m = Manifest.for_data_root(root)
+    rec = m.get(sid)
+    rec.meta.lyrics_source = "asr:large-v3"  # Whisper's own text: nothing to agree with
+    m.upsert(rec)
+    m.save()
+    r = recipe(name="asr", filters={"min_align_score": 0.8, "min_lyrics_agreement": 0.6})
+    assert build(root, recipe=r).songs_used == [sid]
+    r = recipe(name="asr2", filters={"min_align_score": 0.8, "exclude_ids": [sid]})
+    assert build(root, recipe=r).skipped[sid] == "excluded by recipe id list"

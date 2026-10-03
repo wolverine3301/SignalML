@@ -1,0 +1,68 @@
+# full_v3's settings plus the studio multitrack corpus, and male voices (2026-10-03).
+#
+# What changes against v3:
+# - gender: null - the multitrack sessions bring male leads; this is the first
+#   mixed-gender acoustic run (one speaker table, spk_id per singer as before).
+# - multitrack records: lead and unnamed vocal tracks, plus backing parts that sing
+#   lyrics the lead never sings (`signalml review singers`). Doubles, wordless backing
+#   (oohs, aahs) and backing that re-sings the lead's lines are left out (reviewer's
+#   call) - that selection is no manifest field, so the overlay lists them in
+#   `exclude_ids` (generated from the singer-match content classes).
+# - multitrack alignments are `align --phrases` as the main alignment (mode "phrases"),
+#   which `alignment_variant: phrase` accepts in place of phones.phrase.json.
+# - machine lyrics: the multitrack text is Whisper's (hallucinations scrubbed, see
+#   `lyrics --scrub`); min_lyrics_agreement only applies to human lyrics.
+#
+# Corpora: all of them, including the non-commercial GTSinger and CSD - a development
+# run, like v3.
+#
+# Private overlay: configs/dataset.full_v4.local.yaml (gitignored) - exclude_singers,
+# exclude_ids.
+#
+#   signalml dataset build --recipe configs/dataset.full_v4.yaml
+name: full_acoustic_v4
+trainer: acoustic
+profile: prod
+
+filters:
+  domain: sung
+  language: en
+  gender: null
+  min_align_score: 0.5
+  min_lyrics_agreement: 0.6
+  exclude_processing: [heavy]
+  corpora: []
+  exclude_corpora: []
+  singers: []
+  exclude_singers: []   # set in the .local.yaml overlay
+  min_singer_minutes: 0.0
+  ids: []
+  exclude_ids: []       # set in the .local.yaml overlay
+
+alignment_variant: phrase
+phrase_gate:
+  enabled: true
+  drop_unsure_lyrics: false
+
+segmentation:
+  split_gap_sec: 0.4
+  min_clip_sec: 1.0
+  max_clip_sec: 15.0
+  pad_sec: 0.15
+  inner_sp_min_sec: 0.05
+  drop_noise_clips: true
+  ph_num_mode: vowel_onset
+  phone_merge: consonant_core
+
+test_clips_per_speaker: 2
+
+trainer_opts:
+  # the 24 GB 4090 numbers from full_v3 (20000/32 ~21 GB, ~6.4 steps/s once warm)
+  max_batch_frames: 20000
+  max_batch_size: 32
+  binarization_workers: 8
+  # v3 plateaued between 80k and 160k; stop here on its own (~7 h on the rig)
+  max_updates: 160000
+  num_ckpt_keep: 5
+  permanent_ckpt_start: 10000
+  permanent_ckpt_interval: 10000

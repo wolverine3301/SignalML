@@ -76,6 +76,9 @@ class DatasetFilters(BaseModel):
     # manifest can be under 3 in the dataset.
     min_singer_minutes: float = 0.0
     ids: list[str] = []  # optional explicit whitelist (intersected with filters)
+    # explicit blacklist - for selections no manifest field expresses (e.g. which
+    # backing parts of a multitrack session a run takes); keep it in a .local overlay
+    exclude_ids: list[str] = []
 
 
 class SegmentationCfg(BaseModel):
@@ -204,7 +207,9 @@ class DatasetRecipe(BaseModel):
     filters: DatasetFilters = Field(default_factory=DatasetFilters)
     segmentation: SegmentationCfg = Field(default_factory=SegmentationCfg)
     # Read align/phones.<variant>.json (an `align --variant` output) instead of
-    # align/phones.json; songs without that file are skipped.
+    # align/phones.json; songs without that file are skipped - unless their main
+    # alignment was itself made that way (`phrase`: `align --phrases` as the first
+    # alignment records mode "phrases" - the multitrack imports).
     alignment_variant: str | None = None
     phrase_gate: PhraseGate = Field(default_factory=PhraseGate)
     test_clips_per_speaker: int = 2
@@ -411,15 +416,39 @@ def _profile_of(sdir: Path) -> str | None:
         return None
 
 
-def _variant_score(data_root: Path, song_id: str, variant: str) -> float | None:
-    """align_score of an ``align --variant`` alignment (kept in analysis.json, since a
-    variant never touches the manifest), or None when the song has no such alignment."""
+# main-alignment ``mode`` that stands in for a missing variant of the same kind
+_VARIANT_MODES = {"phrase": "phrases"}
+
+
+def _variant_suffix(data_root: Path, song_id: str, variant: str) -> str | None:
+    """File suffix of a song's ``variant`` alignment: ``.<variant>`` for an ``align
+    --variant`` output, ``""`` when the main alignment was itself made that way, None
+    when the song has neither."""
     sdir = song_dir(data_root, song_id)
-    if not (sdir / "align" / f"phones.{variant}.json").exists():
+    if (sdir / "align" / f"phones.{variant}.json").exists():
+        return f".{variant}"
+    mode = _VARIANT_MODES.get(variant)
+    if mode and (sdir / "align" / "phones.json").exists():
+        try:
+            data = json.loads((sdir / "analysis.json").read_text(encoding="utf-8"))
+            if data.get("align", {}).get("mode") == mode:
+                return ""
+        except (OSError, ValueError):
+            pass
+    return None
+
+
+def _variant_score(data_root: Path, song_id: str, variant: str) -> float | None:
+    """align_score of the song's ``variant`` alignment (an ``align --variant`` output
+    keeps it in analysis.json, since a variant never touches the manifest), or None when
+    the song has no such alignment."""
+    suffix = _variant_suffix(data_root, song_id, variant)
+    if suffix is None:
         return None
     try:
-        data = json.loads((sdir / "analysis.json").read_text(encoding="utf-8"))
-        return float(data[f"align.{variant}"]["align_score"])
+        data = json.loads((song_dir(data_root, song_id) / "analysis.json")
+                          .read_text(encoding="utf-8"))
+        return float(data[f"align{suffix}"]["align_score"])
     except (OSError, KeyError, TypeError, ValueError):
         return None
 
@@ -443,6 +472,8 @@ def _select(manifest: Manifest, recipe: DatasetRecipe, summary: BuildSummary,
             continue  # not even reported: an explicit whitelist is self-documenting
         if rec.meta.excluded:
             reason = f"excluded by review: {rec.meta.excluded}"
+        elif rec.id in f.exclude_ids:
+            reason = "excluded by recipe id list"
         elif rec.meta.domain != f.domain:
             reason = f"domain {rec.meta.domain!r} != {f.domain!r}"
         elif rec.meta.language != f.language:
@@ -475,7 +506,10 @@ def _select(manifest: Manifest, recipe: DatasetRecipe, summary: BuildSummary,
                         if recipe.alignment_variant else rec.quality.align_score)) is None \
                 or score < f.min_align_score:
             reason = f"align_score {score} < {f.min_align_score}"
-        elif f.min_lyrics_agreement > 0 and (
+        # agreement compares HUMAN lyrics with what Whisper heard; machine lyrics are
+        # Whisper's text, so there is nothing to compare
+        elif f.min_lyrics_agreement > 0 \
+                and not (rec.meta.lyrics_source or "").startswith("asr:") and (
                 (agree := _lyrics_agreement(data_root, rec.id)) is None
                 or agree < f.min_lyrics_agreement):
             reason = f"lyrics agreement {agree} < {f.min_lyrics_agreement}"
@@ -505,10 +539,11 @@ def _cut_all(
     """
     cut: dict[str, tuple[list[Clip], int]] = {}
     kept: list[ManifestRecord] = []
-    suffix = f".{recipe.alignment_variant}" if recipe.alignment_variant else ""
     gate = recipe.phrase_gate
     for rec in selected:
         sdir = song_dir(data_root, rec.id)
+        suffix = (_variant_suffix(data_root, rec.id, recipe.alignment_variant) or ""
+                  if recipe.alignment_variant else "")
         phones_path = sdir / "align" / f"phones{suffix}.json"
         if not phones_path.exists():
             summary.skipped[rec.id] = f"no {phones_path.name} (alignment variant missing)"
