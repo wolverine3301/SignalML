@@ -1,0 +1,31 @@
+# Backing-vocal singer match (signalml review singers) - voice embeddings + thresholds.
+#
+# The embedding backend is an EXTERNAL tool in its own venv (speechbrain ECAPA-TDNN,
+# speechbrain/spkrec-ecapa-voxceleb, Apache-2.0), run by command like Whisper and MFA.
+# {jobs} is replaced with a batch file. Machine wiring goes in configs/singers.local.yaml
+# (gitignored, pass it with --config), e.g.:
+#
+#   command:
+#     - "G:/tools/ecapa/.venv/Scripts/python.exe"
+#     - "G:/repo/scripts/ecapa_embed.py"
+#     - "--device"
+#     - "cuda"
+#     - "--jobs"
+#     - "{jobs}"
+#
+# Setup: python -m uv venv <tools>/ecapa/.venv --python 3.12
+#        python -m uv pip install --python <tools>/ecapa/.venv/Scripts/python.exe \
+#          torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+#        python -m uv pip install --python <tools>/ecapa/.venv/Scripts/python.exe speechbrain soundfile scipy
+# The model downloads on first use (~80 MB) into scripts/pretrained_ecapa unless --savedir.
+#
+# Thresholds are cosine similarities between voice centroids, measured on the identity
+# review's labels (`match` prints them; first multitrack library, 2026-10-03): a singer
+# against their own other tracks p5 0.48 / p50 0.83; two named singers of one band
+# p50 0.30 / p95 0.62 / p99 0.75.
+command: []
+timeout_sec: 7200
+min_windows: 2       # fewer 3 s windows than this: too little voice to compare
+same_singer: 0.75    # auto-assign at or above (~1 in 100 different-singer pairs reach it)
+margin: 0.15         # ...and this far ahead of the artist's other named singers
+group_join: 0.65     # voices merge into one review question at this mean similarity

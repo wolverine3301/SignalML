@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import identity
+from . import identity, singers
 
 MAX_BODY_BYTES = 1 << 20
 _AUDIO = re.compile(r"^/audio/(sng_\d+)$")
@@ -28,6 +28,18 @@ class _Handler(BaseHTTPRequestHandler):
         if url.path in ("/", "/identity"):
             body = Path(__file__).with_name("identity.html").read_bytes()
             self._send(HTTPStatus.OK, "text/html; charset=utf-8", body)
+        elif url.path == "/singers":
+            body = Path(__file__).with_name("singers.html").read_bytes()
+            self._send(HTTPStatus.OK, "text/html; charset=utf-8", body)
+        elif url.path == "/api/singers":
+            try:
+                payload = singers.build_cards(self.server.data_root)
+            except FileNotFoundError:
+                self._json(HTTPStatus.NOT_FOUND, {
+                    "error": "no voice match yet - run `signalml review singers match`"})
+                return
+            self.server.singer_ids = {m["id"] for c in payload["cards"] for m in c["members"]}
+            self._json(HTTPStatus.OK, payload)
         elif url.path == "/api/identity":
             payload = identity.build_cards(self.server.data_root)
             self.server.known_ids = {t["id"] for c in payload["cards"] for t in c["tracks"]}
@@ -52,7 +64,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802 (stdlib API name)
-        if urlsplit(self.path).path != "/api/identity/labels":
+        path = urlsplit(self.path).path
+        if path not in ("/api/identity/labels", "/api/singers/labels"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         length = int(self.headers.get("Content-Length") or 0)
@@ -61,14 +74,21 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             posted = json.loads(self.rfile.read(length)).get("labels") or []
-            if not self.server.known_ids:  # a POST before any GET (tests, restarts)
-                self.server.known_ids = {t["id"] for c in identity.build_cards(
-                    self.server.data_root)["cards"] for t in c["tracks"]}
-            labels = [identity.validate_label(x, self.server.known_ids) for x in posted]
-        except (ValueError, AttributeError, TypeError) as exc:
+            if path == "/api/singers/labels":
+                if not self.server.singer_ids:  # a POST before any GET
+                    self.server.singer_ids = singers.known_ids(self.server.data_root)
+                labels = [singers.validate_label(x, self.server.singer_ids) for x in posted]
+                store = singers.label_store(self.server.data_root)
+            else:
+                if not self.server.known_ids:  # a POST before any GET (tests, restarts)
+                    self.server.known_ids = {t["id"] for c in identity.build_cards(
+                        self.server.data_root)["cards"] for t in c["tracks"]}
+                labels = [identity.validate_label(x, self.server.known_ids) for x in posted]
+                store = identity.LabelStore(self.server.data_root)
+        except (ValueError, AttributeError, TypeError, FileNotFoundError) as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
-        identity.LabelStore(self.server.data_root).append(labels)
+        store.append(labels)
         self._json(HTTPStatus.OK, {"saved": len(labels)})
 
     def _json(self, code: int, payload) -> None:
@@ -93,12 +113,14 @@ class ReviewServer(ThreadingHTTPServer):
     def __init__(self, data_root: str | Path, host: str = "127.0.0.1", port: int = 8775):
         self.data_root = Path(data_root)
         self.known_ids: set[str] = set()
+        self.singer_ids: set[str] = set()
         super().__init__((host, port), _Handler)
 
 
-def serve(data_root: str | Path, *, port: int = 8775, open_browser: bool = True) -> None:
+def serve(data_root: str | Path, *, port: int = 8775, open_browser: bool = True,
+          page: str = "identity") -> None:
     server = ReviewServer(data_root, "127.0.0.1", port)
-    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    url = f"http://127.0.0.1:{server.server_address[1]}/{'singers' if page == 'singers' else ''}"
     print(f"signalml review: {url} (Ctrl+C to stop; answers save as you go)")
     if open_browser:
         webbrowser.open(url)

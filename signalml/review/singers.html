@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backing Voices</title>
+<style>
+:root {
+  --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a66; --line: #e3e1dc;
+  --accent: #2f5fd0; --accent-ink: #ffffff; --ok: #2e7d4f; --warn: #b15c00; --bad: #b3261e;
+  --chip: #efeee9; --focus: #dbe6ff; --ref: #f1f4fb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9c9a94; --line: #34332f;
+    --accent: #7ea2ff; --accent-ink: #0d1530; --ok: #6cc592; --warn: #f0a24a; --bad: #ff8a80;
+    --chip: #2a2a27; --focus: #26324f; --ref: #1d2333;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 10px 16px;
+  border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+header h1 { font-size: 15px; margin: 0; font-weight: 650; }
+header a { color: var(--muted); }
+.bar { flex: 1; max-width: 360px; height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; }
+.bar > div { height: 100%; background: var(--ok); width: 0; transition: width .2s; }
+.stat { color: var(--muted); font-variant-numeric: tabular-nums; }
+header label { color: var(--muted); display: flex; gap: 6px; align-items: center; cursor: pointer; }
+main { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 49px); }
+nav { border-right: 1px solid var(--line); overflow-y: auto; max-height: calc(100vh - 49px); position: sticky; top: 49px; }
+nav button { display: flex; width: 100%; gap: 8px; align-items: baseline; text-align: left; border: 0;
+  background: none; color: var(--ink); padding: 7px 14px; cursor: pointer; font: inherit; }
+nav button:hover { background: var(--chip); }
+nav button.current { background: var(--focus); }
+nav .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; transform: translateY(-1px); }
+nav .done .dot { background: var(--ok); }
+nav .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+nav .name small { color: var(--muted); }
+section.card { padding: 20px 28px 40px; max-width: 1100px; }
+.card h2 { margin: 0; font-size: 22px; font-weight: 650; }
+.card .sub { color: var(--muted); margin: 2px 0 14px; }
+h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 6px; font-weight: 600; }
+.row { display: grid; grid-template-columns: 220px 150px 1fr; gap: 6px 14px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.row.ref { background: var(--ref); }
+.row.focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.row.out { opacity: .5; }
+.row .t b { display: block; font-weight: 600; word-break: break-word; }
+.row .t span { color: var(--muted); font-size: 12px; }
+.chip { display: inline-block; padding: 1px 7px; border-radius: 99px; background: var(--chip); font-size: 12px; color: var(--muted); }
+.chip.words { background: var(--ok); color: var(--panel); }
+.snips { display: flex; gap: 4px; }
+.snips button { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 7px; padding: 5px 0; width: 34px; cursor: pointer; font: inherit; font-variant-numeric: tabular-nums; }
+.snips button.playing { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.snips button.full { width: auto; padding: 5px 8px; }
+.fullplayer { grid-column: 1 / -1; width: 100%; }
+.lyr { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lyr label { cursor: pointer; }
+.answer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-top: 16px;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.answer button.v { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px;
+  padding: 7px 12px; cursor: pointer; font: inherit; }
+.answer button.v.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.answer .newbox { display: flex; gap: 6px; align-items: center; }
+.answer input[type=text] { width: 220px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--panel); color: var(--ink); font: inherit; }
+.seg { display: flex; gap: 4px; }
+.seg button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 7px; padding: 5px 0; width: 34px; cursor: pointer; font: inherit; }
+.seg button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.actions { display: flex; gap: 12px; align-items: center; margin-top: 14px; }
+.primary { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px; padding: 9px 18px;
+  font: inherit; font-weight: 600; cursor: pointer; }
+.keys { color: var(--muted); font-size: 12px; }
+kbd { font: 11px ui-monospace, monospace; padding: 1px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--panel); }
+.saved { color: var(--ok); } .err { color: var(--bad); }
+.empty { padding: 60px 28px; color: var(--muted); }
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; }
+  nav { position: static; max-height: 200px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .row { grid-template-columns: 1fr; }
+  section.card { padding: 16px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Backing voices</h1>
+  <div class="bar"><div id="bar"></div></div>
+  <span class="stat" id="stat">loading…</span>
+  <label><input type="checkbox" id="pending" checked> pending only</label>
+  <label><input type="checkbox" id="autoplay" checked> autoplay</label>
+  <a href="/identity">main vocals</a>
+</header>
+<main>
+  <nav id="list"></nav>
+  <section class="card" id="card"><div class="empty">Loading the queue (the first load cuts snippets, a few seconds per track)…</div></section>
+</main>
+<audio id="player" preload="auto"></audio>
+<script>
+// One card = one group of backing parts that sound like the same voice. Play a part,
+// play the named singers above it, then answer once for the whole group: the same
+// person as a named singer, a new singer, or "can't tell" (left out of training).
+// A part that clearly is not the group's voice can be set aside with its checkbox.
+const $ = (s, el = document) => el.querySelector(s);
+const player = $("#player");
+let data = null, cur = 0, focus = 0, rows = [], playing = null, ans = null;
+
+async function load() {
+  data = await (await fetch("/api/singers")).json();
+  const first = data.cards.findIndex(c => !c.done);
+  cur = first >= 0 ? first : 0;
+  renderList();
+  if (data.cards.length) open(cur);
+  else $("#card").innerHTML = `<div class="empty">Nothing to review: every backing part with words already has a singer.</div>`;
+}
+
+function visible() {
+  const pendingOnly = $("#pending").checked;
+  return data.cards.map((c, i) => [c, i]).filter(([c, i]) => !pendingOnly || !c.done || i === cur);
+}
+
+function renderList() {
+  const p = data.progress;
+  $("#bar").style.width = (100 * p.done / Math.max(1, p.groups)) + "%";
+  $("#stat").textContent = `${p.done} / ${p.groups} voices · ${p.answered} / ${p.tracks} parts`;
+  const nav = $("#list"); nav.innerHTML = "";
+  for (const [c, i] of visible()) {
+    const b = document.createElement("button");
+    b.className = (c.done ? "done " : "") + (i === cur ? "current" : "");
+    b.innerHTML = `<span class="dot"></span><span class="name">${esc(c.artist)} <small>— ${esc(c.songs.join(", "))} · ${c.members.length}</small></span>`;
+    b.onclick = () => open(i);
+    nav.appendChild(b);
+  }
+}
+
+function newName(g) {
+  const c = data.cards[cur], base = c.new_base;
+  const taken = new Set(data.cards.flatMap(x => x.members.map(m => m.label && m.label.singer)).filter(Boolean));
+  for (let k = 1; ; k++) { const n = `${base}-bv-${(g || "x").toLowerCase()}${k}`; if (!taken.has(n)) return n; }
+}
+
+function open(i) {
+  cur = i; stop();
+  const c = data.cards[i];
+  // a part answered "can't tell" while the rest of its group got a singer was set aside
+  const placed = c.members.some(x => x.label && x.label.verdict !== "unclear");
+  rows = [...c.refs.map(r => ({ kind: "ref", t: r })),
+          ...c.members.map(m => ({ kind: "part", t: m, out: placed && m.label?.verdict === "unclear" }))];
+  focus = c.refs.length;  // first part
+  const L = (c.members.find(m => m.label && m.label.verdict !== "unclear") || c.members.find(m => m.label))?.label;
+  ans = L ? { verdict: L.verdict, singer: L.singer, gender: L.gender, typed: L.verdict === "new" }
+          : { verdict: null, singer: null, gender: null, typed: false };
+  const card = $("#card");
+  card.innerHTML = `<h2>${esc(c.artist)}</h2>
+    <div class="sub">${esc(c.songs.join(", "))} · ${c.members.length} backing part${c.members.length > 1 ? "s" : ""} that sound alike${c.cohesion != null ? ` (agreement ${c.cohesion.toFixed(2)})` : ""}</div>
+    <div id="rows"></div>
+    <div class="answer" id="answer"></div>
+    <div class="actions"><button class="primary" id="confirm">Confirm &amp; next</button><span id="msg"></span></div>
+    <p class="keys"><kbd>↑</kbd><kbd>↓</kbd> row · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> play · <kbd>4</kbd> full track · <kbd>Space</kbd> stop ·
+      <kbd>A</kbd>/<kbd>B</kbd> same as the 1st/2nd singer · <kbd>N</kbd> new singer · <kbd>F</kbd>/<kbd>M</kbd> its gender ·
+      <kbd>X</kbd> can't tell · <kbd>O</kbd> set the focused part aside · <kbd>Enter</kbd> confirm · <kbd>←</kbd><kbd>→</kbd> card</p>`;
+  $("#confirm").onclick = confirm;
+  drawRows(); drawAnswer(); renderList();
+  if ($("#autoplay").checked && rows[focus]) play(focus, 0);
+}
+
+function drawRows() {
+  const box = $("#rows"); box.innerHTML = "";
+  const c = data.cards[cur];
+  rows.forEach((r, k) => {
+    if (k === 0 && c.refs.length) box.insertAdjacentHTML("beforeend", `<h3>Named singers of this artist</h3>`);
+    if (k === c.refs.length) box.insertAdjacentHTML("beforeend", `<h3>This voice</h3>`);
+    const t = r.t, el = document.createElement("div");
+    el.className = "row" + (r.kind === "ref" ? " ref" : "") + (k === focus ? " focus" : "") + (r.out ? " out" : "");
+    const snips = `<div class="snips">${t.snippets.map((s, j) => `<button data-j="${j}" title="${s[0].toFixed(0)} s">${j + 1}</button>`).join("")}<button class="full" title="the whole track (key 4)">full</button></div>`;
+    if (r.kind === "ref") {
+      el.innerHTML = `<div class="t"><b>${esc(t.singer)}</b><span>${t.gender || "?"} · ${esc(t.track)} · voice match ${t.score.toFixed(2)}</span></div>${snips}<div class="lyr">sings lead in ${esc(t.folder)}</div>`;
+    } else {
+      const words = t.wordless ? `<span class="chip">wordless</span>` : `<span class="chip words">${t.words} words${t.new_words ? `, ${t.new_words} not in the lead` : ""}</span>`;
+      el.innerHTML = `<div class="t"><b>${esc(t.track)}</b><span>${esc(t.song)} · ${Math.round(t.sung_sec || 0)} s sung</span><br>${words}</div>${snips}
+        <div class="lyr" title="${esc(t.sample)}"><label><input type="checkbox" ${r.out ? "checked" : ""}> not this voice</label> · ${esc(t.sample) || "<i>no words heard</i>"}</div>`;
+      const cb = $("input[type=checkbox]", el);
+      cb.onchange = () => { r.out = cb.checked; drawRows(); };
+    }
+    el.onclick = e => { if (e.target.tagName !== "INPUT" && focus !== k) { focus = k; markFocus(); } };
+    el.querySelectorAll(".snips button[data-j]").forEach(b => b.onclick = e => { e.stopPropagation(); play(k, +b.dataset.j); });
+    $(".snips .full", el).onclick = e => { e.stopPropagation(); openFull(k); };
+    box.appendChild(el);
+  });
+}
+
+function drawAnswer() {
+  const c = data.cards[cur], box = $("#answer");
+  const sameBtns = c.refs.map((r, i) => `<button class="v ${ans.verdict === "singer" && ans.singer === r.singer ? "on" : ""}" data-s="${esc(r.singer)}">${"AB"[i] ? `<kbd>${"AB"[i]}</kbd> ` : ""}same as ${esc(r.singer)}</button>`).join("");
+  box.innerHTML = `${sameBtns}
+    <span class="newbox"><button class="v ${ans.verdict === "new" ? "on" : ""}" id="vnew"><kbd>N</kbd> new singer</button>
+      <span class="seg">${["F", "M"].map(g => `<button data-g="${g}" class="${ans.verdict === "new" && ans.gender === g ? "on" : ""}">${g}</button>`).join("")}</span>
+      <input type="text" id="vname" placeholder="name" value="${esc(ans.verdict === "new" ? ans.singer || "" : "")}" ${ans.verdict === "new" ? "" : "disabled"}></span>
+    <button class="v ${ans.verdict === "unclear" ? "on" : ""}" id="vunclear"><kbd>X</kbd> can't tell (leave out)</button>`;
+  box.querySelectorAll("button[data-s]").forEach(b => b.onclick = () => setSame(b.dataset.s));
+  $("#vnew").onclick = () => setNew(ans.gender);
+  box.querySelectorAll(".seg button").forEach(b => b.onclick = () => setNew(b.dataset.g));
+  $("#vunclear").onclick = () => { ans = { verdict: "unclear", singer: null, gender: null, typed: false }; drawAnswer(); };
+  const inp = $("#vname");
+  inp.oninput = () => { ans.singer = inp.value; ans.typed = true; };
+}
+
+function setSame(s) { ans = { verdict: "singer", singer: s, gender: null, typed: false }; drawAnswer(); }
+function setNew(g) {
+  const keep = ans.verdict === "new" && ans.typed;
+  ans = { verdict: "new", gender: g || null, singer: keep ? ans.singer : (g ? newName(g) : ""), typed: keep };
+  drawAnswer();
+}
+
+function markFocus() { [...$("#rows").querySelectorAll(".row")].forEach((el, k) => el.classList.toggle("focus", k === focus)); }
+function rowEl(k) { return $("#rows").querySelectorAll(".row")[k]; }
+
+function play(k, j) {
+  const t = rows[k].t, s = t.snippets[j];
+  if (!s) return;
+  focus = k; markFocus();
+  player.src = `/audio/${t.id}?s=${s[0]}&d=${s[1]}`;
+  player.play();
+  playing = [k, j]; paintPlaying();
+}
+function stop() {
+  player.pause(); playing = null; paintPlaying();
+  document.querySelectorAll(".fullplayer").forEach(a => a.pause());
+}
+function openFull(k) {
+  stop(); focus = k; markFocus();
+  const row = rowEl(k);
+  let a = $(".fullplayer", row);
+  if (!a) {
+    a = document.createElement("audio");
+    a.className = "fullplayer"; a.controls = true; a.preload = "auto";
+    a.src = `/audio/${rows[k].t.id}/full`;
+    row.appendChild(a);
+  }
+  a.play();
+}
+player.onended = () => { playing = null; paintPlaying(); };
+function paintPlaying() {
+  document.querySelectorAll(".snips button").forEach(b => b.classList.remove("playing"));
+  if (!playing || !$("#rows")) return;
+  rowEl(playing[0])?.querySelectorAll(".snips button")[playing[1]]?.classList.add("playing");
+}
+
+async function confirm() {
+  const m = $("#msg");
+  if (!ans.verdict) { m.className = "err"; m.textContent = "pick an answer first"; return; }
+  if (ans.verdict === "new" && (!ans.gender || !(ans.singer || "").trim())) {
+    m.className = "err"; m.textContent = "a new singer needs F/M and a name"; return; }
+  const c = data.cards[cur];
+  const labels = rows.filter(r => r.kind === "part").map(r => r.out
+    ? { id: r.t.id, verdict: "unclear", group: c.key }
+    : { id: r.t.id, verdict: ans.verdict, singer: ans.singer && ans.singer.trim(), gender: ans.gender, group: c.key });
+  const res = await fetch("/api/singers/labels", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labels }) });
+  if (!res.ok) { m.className = "err"; m.textContent = "not saved: " + (await res.json()).error; return; }
+  const newly = c.members.filter(x => !x.label).length;
+  c.members.forEach((x, k) => x.label = labels[k]);
+  if (!c.done) data.progress.done++;
+  data.progress.answered += newly;
+  c.done = true;
+  const next = data.cards.findIndex((x, i) => i > cur && !x.done);
+  const wrap = data.cards.findIndex(x => !x.done);
+  open(next >= 0 ? next : wrap >= 0 ? wrap : cur);
+  const mm = $("#msg"); if (mm) { mm.className = "saved"; mm.textContent = wrap < 0 ? "All voices answered - run `signalml review singers apply`." : "Saved."; }
+}
+
+document.addEventListener("keydown", e => {
+  if (!data || !data.cards.length) return;
+  const typing = e.target.tagName === "INPUT" && e.target.type === "text";
+  if (e.key === "Enter") { e.preventDefault(); if (typing) e.target.blur(); confirm(); return; }
+  if (typing) { if (e.key === "Escape") e.target.blur(); return; }
+  const k = e.key.toLowerCase(), c = data.cards[cur];
+  if (k === "arrowdown" || k === "j") { focus = Math.min(rows.length - 1, focus + 1); markFocus(); }
+  else if (k === "arrowup" || k === "k") { focus = Math.max(0, focus - 1); markFocus(); }
+  else if (k === "arrowright") { const v = visible().map(x => x[1]); const n = v.find(i => i > cur); if (n !== undefined) open(n); }
+  else if (k === "arrowleft") { const v = visible().map(x => x[1]).reverse(); const n = v.find(i => i < cur); if (n !== undefined) open(n); }
+  else if (["1", "2", "3"].includes(k)) play(focus, +k - 1);
+  else if (k === "4") openFull(focus);
+  else if (k === " ") { e.preventDefault(); playing ? stop() : play(focus, 0); }
+  else if (k === "a" && c.refs[0]) setSame(c.refs[0].singer);
+  else if (k === "b" && c.refs[1]) setSame(c.refs[1].singer);
+  else if (k === "n") { setNew(ans.gender); $("#vname")?.focus(); e.preventDefault(); }
+  else if (k === "f" || k === "m") setNew(k.toUpperCase());
+  else if (k === "x") { ans = { verdict: "unclear", singer: null, gender: null, typed: false }; drawAnswer(); }
+  else if (k === "o" && rows[focus]?.kind === "part") { rows[focus].out = !rows[focus].out; drawRows(); }
+  else return;
+});
+$("#pending").onchange = renderList;
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch])); }
+load().catch(err => { $("#card").innerHTML = `<div class="empty">Could not load the queue: ${esc(err)}</div>`; });
+</script>
+</body>
+</html>

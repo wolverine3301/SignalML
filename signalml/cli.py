@@ -940,7 +940,44 @@ def _cmd_review_serve(args: argparse.Namespace) -> int:
     from .manifest import resolve_data_root
     from .review.server import serve
 
-    serve(resolve_data_root(args.data_root), port=args.port, open_browser=not args.no_open)
+    serve(resolve_data_root(args.data_root), port=args.port, open_browser=not args.no_open,
+          page=args.page)
+    return 0
+
+
+def _cmd_review_singers(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .review import singers
+
+    data_root = resolve_data_root(args.data_root)
+    cfg = singers.load_singers_config(args.config)
+    if args.action == "embed":
+        written, failed = singers.embed(data_root, cfg=cfg, ids=args.ids, force=args.force)
+        for rid, why in sorted(failed.items()):
+            print(f"  FAILED {rid}: {why}")
+        print(f"singers embed: {len(written)} embedded, {len(failed)} failed")
+        return 0
+    if args.action == "match":
+        report = singers.run_match(data_root, cfg)
+        cal, n = report["calibration"], report["counts"]
+        for k in ("same", "same_other_song", "different"):
+            c = cal[k]
+            if c["n"]:
+                print(f"  {k:16s} n={c['n']:4d}  p5 {c['p5']:.2f}  p50 {c['p50']:.2f}  "
+                      f"p95 {c['p95']:.2f}")
+        print(f"singers match: {n['auto']} assigned, {n['follows']} doubles follow their part, "
+              f"{n['groups_to_review']} voice(s) to review ({n['tracks_to_review']} parts), "
+              f"{n['groups'] - n['groups_to_review']} wordless group(s) skipped, "
+              f"{n['unmatched']} too short to compare -> {data_root / singers.MATCH_FILE}")
+        return 0
+    manifest, changed = singers.apply(data_root, dry_run=args.dry_run)
+    for rid, diff in changed:
+        print(f"  {rid}: " + ", ".join(f"{k} {old!r} -> {new!r}" for k, (old, new) in diff.items()))
+    if args.dry_run:
+        print(f"singers apply (dry run): {len(changed)} record(s) would change")
+        return 0
+    manifest.save()
+    print(f"singers apply: {len(changed)} record(s) updated")
     return 0
 
 
@@ -1647,6 +1684,8 @@ def main(argv: list[str] | None = None) -> int:
     rv_serve.add_argument("--port", type=int, default=8775)
     rv_serve.add_argument("--no-open", action="store_true",
                           help="don't open the browser automatically")
+    rv_serve.add_argument("--page", choices=["identity", "singers"], default="identity",
+                          help="page to open: identity (main vocals) or singers (backing)")
     rv_serve.set_defaults(func=_cmd_review_serve)
     rv_apply = review_sub.add_parser(
         "apply", help="write the review answers into the manifest (gender, singer, "
@@ -1655,6 +1694,19 @@ def main(argv: list[str] | None = None) -> int:
                           help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
     rv_apply.add_argument("--dry-run", action="store_true", help="list changes, write nothing")
     rv_apply.set_defaults(func=_cmd_review_apply)
+    rv_singers = review_sub.add_parser(
+        "singers", help="who sings the backing parts: voice embeddings (embed), grouping "
+                        "against the named singers (match), write the answers (apply)")
+    rv_singers.add_argument("action", choices=["embed", "match", "apply"])
+    rv_singers.add_argument("--data-root", default=None,
+                            help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    rv_singers.add_argument("--config", default=None,
+                            help="singers config (default configs/singers.yaml)")
+    rv_singers.add_argument("--ids", nargs="+", default=None, help="embed: only these records")
+    rv_singers.add_argument("--force", action="store_true", help="embed: redo existing ones")
+    rv_singers.add_argument("--dry-run", action="store_true",
+                            help="apply: list changes, write nothing")
+    rv_singers.set_defaults(func=_cmd_review_singers)
 
     # ship — LAN transfer of a corpus selection + the code that produced it
     # studio (post-P8 UI; the model-free half is usable now - docs/STUDIO_UI.md)

@@ -86,8 +86,8 @@ def lead_base(track: str) -> str:
 class LabelStore:
     """Append-only JSONL of review answers; the latest line per record wins."""
 
-    def __init__(self, data_root: str | Path):
-        self.path = Path(data_root) / LABELS_FILE
+    def __init__(self, data_root: str | Path, labels_file: Path = LABELS_FILE):
+        self.path = Path(data_root) / labels_file
 
     def load(self) -> dict[str, dict]:
         out: dict[str, dict] = {}
