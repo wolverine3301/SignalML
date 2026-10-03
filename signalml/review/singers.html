@@ -161,7 +161,7 @@ function open(i) {
     <div class="actions"><button class="primary" id="confirm">Confirm &amp; next</button><span id="msg"></span></div>
     <p class="keys"><kbd>↑</kbd><kbd>↓</kbd> row · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> play · <kbd>4</kbd> full track · <kbd>Space</kbd> stop ·
       <kbd>A</kbd>/<kbd>B</kbd> same as the 1st/2nd singer · <kbd>N</kbd> new singer · <kbd>F</kbd>/<kbd>M</kbd> its gender ·
-      <kbd>X</kbd> can't tell · <kbd>O</kbd> set the focused part aside · <kbd>Enter</kbd> confirm · <kbd>←</kbd><kbd>→</kbd> card</p>`;
+      <kbd>X</kbd> can't tell · <kbd>O</kbd> odd one out (a part unlike the others) · <kbd>Enter</kbd> confirm · <kbd>←</kbd><kbd>→</kbd> card</p>`;
   $("#confirm").onclick = confirm;
   drawRows(); drawAnswer(); renderList();
   if ($("#autoplay").checked && rows[focus]) play(focus, 0);
@@ -171,8 +171,10 @@ function drawRows() {
   const box = $("#rows"); box.innerHTML = "";
   const c = data.cards[cur];
   rows.forEach((r, k) => {
-    if (k === 0 && c.refs.length) box.insertAdjacentHTML("beforeend", `<h3>Named singers of this artist</h3>`);
-    if (k === c.refs.length) box.insertAdjacentHTML("beforeend", `<h3>This voice</h3>`);
+    if (k === 0 && c.refs.length) box.insertAdjacentHTML("beforeend", `<h3>Singers you already named for this artist - to compare with</h3>`);
+    if (k === c.refs.length) box.insertAdjacentHTML("beforeend", c.members.length > 1
+      ? `<h3>Backing parts that sound like one singer - your answer below covers all of them</h3>`
+      : `<h3>Backing part - your answer below is for this part</h3>`);
     const t = r.t, el = document.createElement("div");
     el.className = "row" + (r.kind === "ref" ? " ref" : "") + (k === focus ? " focus" : "") + (r.out ? " out" : "");
     const snips = `<div class="snips">${t.snippets.map((s, j) => `<button data-j="${j}" title="${s[0].toFixed(0)} s">${j + 1}</button>`).join("")}<button class="full" title="the whole track (key 4)">full</button></div>`;
@@ -182,9 +184,9 @@ function drawRows() {
       const words = t.wordless ? `<span class="chip">wordless</span>`
         : `<span class="chip ${t.new_lyrics ? "words" : ""}">${t.words} words${t.new_words ? ` · ${t.new_words} the lead never sings` : ""}</span>`;
       el.innerHTML = `<div class="t"><b>${esc(t.track)}</b><span>${esc(t.song)} · ${Math.round(t.sung_sec || 0)} s sung</span><br>${words}</div>${snips}
-        <div class="lyr" title="${esc(t.sample)}"><label><input type="checkbox" ${r.out ? "checked" : ""}> not this voice</label> · ${esc(t.sample) || "<i>no words heard</i>"}</div>`;
+        <div class="lyr" title="${esc(t.sample)}">${c.members.length > 1 ? `<label title="this part sounds like someone else than the other parts here: it is left out (can't tell)"><input type="checkbox" ${r.out ? "checked" : ""}> odd one out</label> · ` : ""}${esc(t.sample) || "<i>no words heard</i>"}</div>`;
       const cb = $("input[type=checkbox]", el);
-      cb.onchange = () => { r.out = cb.checked; drawRows(); };
+      if (cb) cb.onchange = () => { r.out = cb.checked; drawRows(); };
     }
     el.onclick = e => { if (e.target.tagName !== "INPUT" && focus !== k) { focus = k; markFocus(); } };
     el.querySelectorAll(".snips button[data-j]").forEach(b => b.onclick = e => { e.stopPropagation(); play(k, +b.dataset.j); });
@@ -291,7 +293,7 @@ document.addEventListener("keydown", e => {
   else if (k === "n") { setNew(ans.gender); $("#vname")?.focus(); e.preventDefault(); }
   else if (k === "f" || k === "m") setNew(k.toUpperCase());
   else if (k === "x") { ans = { verdict: "unclear", singer: null, gender: null, typed: false }; drawAnswer(); }
-  else if (k === "o" && rows[focus]?.kind === "part") { rows[focus].out = !rows[focus].out; drawRows(); }
+  else if (k === "o" && rows[focus]?.kind === "part" && data.cards[cur].members.length > 1) { rows[focus].out = !rows[focus].out; drawRows(); }
   else return;
 });
 $("#pending").onchange = renderList;
