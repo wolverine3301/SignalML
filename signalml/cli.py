@@ -978,7 +978,7 @@ def _cmd_review_singers(args: argparse.Namespace) -> int:
                       f"p95 {c['p95']:.2f}")
         print(f"singers match: {n['auto']} assigned, {n['follows']} doubles follow their part, "
               f"{n['groups_to_review']} voice(s) to review ({n['tracks_to_review']} parts), "
-              f"{n['groups'] - n['groups_to_review']} wordless group(s) skipped, "
+              f"{n['groups'] - n['groups_to_review']} group(s) without new lyrics skipped, "
               f"{n['unmatched']} too short to compare -> {data_root / singers.MATCH_FILE}")
         return 0
     manifest, changed = singers.apply(data_root, dry_run=args.dry_run)
