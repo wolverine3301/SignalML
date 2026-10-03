@@ -513,15 +513,17 @@ def build_cards(data_root: str | Path) -> dict:
             "songs": sorted({m["song"] for m in g["members"]}),
             "members": members, "refs": refs, "cohesion": g["cohesion"],
             "new_base": _base(g["artist"], singers, names).lower(),
-            "done": all(m["label"] for m in members),
+            # wordless parts are context only: never used, so never asked about
+            "done": all(m["label"] for m in members if not m["wordless"]),
         })
     if len(snips) != n_snips:
         _save_cache(data_root / SNIPPET_CACHE, snips)
     cards.sort(key=lambda c: (c["artist"].lower(), c["key"]))
     return {"cards": cards, "matched": report["date"],
             "progress": {"groups": len(cards), "done": sum(c["done"] for c in cards),
-                         "tracks": sum(len(c["members"]) for c in cards),
-                         "answered": sum(1 for c in cards for m in c["members"] if m["label"])}}
+                         "tracks": sum(1 for c in cards for m in c["members"] if not m["wordless"]),
+                         "answered": sum(1 for c in cards for m in c["members"]
+                                         if m["label"] and not m["wordless"])}}
 
 
 def validate_label(label: dict, known_ids: set[str]) -> dict:

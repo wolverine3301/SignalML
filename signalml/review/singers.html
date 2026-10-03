@@ -47,6 +47,10 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .row.ref { background: var(--ref); }
 .row.focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .row.out { opacity: .5; }
+.row.wordless { opacity: .45; }
+.own { font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel); color: var(--ink); max-width: 220px; }
+.own.set { border-color: var(--accent); color: var(--accent); }
 .row .t b { display: block; font-weight: 600; word-break: break-word; }
 .row .t span { color: var(--muted); font-size: 12px; }
 .chip { display: inline-block; padding: 1px 7px; border-radius: 99px; background: var(--chip); font-size: 12px; color: var(--muted); }
@@ -102,8 +106,9 @@ kbd { font: 11px ui-monospace, monospace; padding: 1px 5px; border: 1px solid va
 <script>
 // One card = one group of backing parts that sound like the same voice. Play a part,
 // play the named singers above it, then answer once for the whole group: the same
-// person as a named singer, a new singer, or "can't tell" (left out of training).
-// A part that clearly is not the group's voice can be set aside with its checkbox.
+// person as a named singer, a new singer, "can't tell" or pitch-shifted (both left out
+// of training). The grouping can be wrong, so any part can take its own answer instead.
+// Wordless parts are shown for context only: they are not used, so need no answer.
 const $ = (s, el = document) => el.querySelector(s);
 const player = $("#player");
 let data = null, cur = 0, focus = 0, rows = [], playing = null, ans = null;
@@ -130,7 +135,8 @@ function renderList() {
   for (const [c, i] of visible()) {
     const b = document.createElement("button");
     b.className = (c.done ? "done " : "") + (i === cur ? "current" : "");
-    b.innerHTML = `<span class="dot"></span><span class="name">${esc(c.artist)} <small>— ${esc(c.songs.join(", "))} · ${c.members.length}</small></span>`;
+    const n = c.members.filter(m => !m.wordless).length;
+    b.innerHTML = `<span class="dot"></span><span class="name">${esc(c.artist)} <small>— ${esc(c.songs.join(", "))} · ${n}</small></span>`;
     b.onclick = () => open(i);
     nav.appendChild(b);
   }
@@ -142,17 +148,24 @@ function newName(g) {
   for (let k = 1; ; k++) { const n = `${base}-bv-${(g || "x").toLowerCase()}${k}`; if (!taken.has(n)) return n; }
 }
 
+const key = L => L ? `${L.verdict}:${L.singer || ""}` : "";
+
 function open(i) {
   cur = i; stop();
   const c = data.cards[i];
-  // a part answered "can't tell" while the rest of its group got a singer was set aside
-  const placed = c.members.some(x => x.label && x.label.verdict !== "unclear");
-  rows = [...c.refs.map(r => ({ kind: "ref", t: r })),
-          ...c.members.map(m => ({ kind: "part", t: m, out: placed && m.label?.verdict === "unclear" }))];
-  focus = c.refs.length;  // first part
-  const L = (c.members.find(m => m.label && m.label.verdict !== "unclear") || c.members.find(m => m.label))?.label;
+  const worded = c.members.filter(m => !m.wordless);
+  // the card's answer is the one most of its parts got; parts answered otherwise keep
+  // their own answer as an override
+  const counts = {};
+  for (const m of worded) if (m.label) counts[key(m.label)] = (counts[key(m.label)] || 0) + 1;
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const L = worded.find(m => m.label && key(m.label) === top)?.label;
   ans = L ? { verdict: L.verdict, singer: L.singer, gender: L.gender, typed: L.verdict === "new" }
           : { verdict: null, singer: null, gender: null, typed: false };
+  rows = [...c.refs.map(r => ({ kind: "ref", t: r })),
+          ...c.members.map(m => ({ kind: "part", t: m,
+            own: m.label && L && key(m.label) !== key(L) && m.label.verdict !== "new" ? m.label : null }))];
+  focus = c.refs.length;  // first part
   const card = $("#card");
   card.innerHTML = `<h2>${esc(c.artist)}</h2>
     <div class="sub">${esc(c.songs.join(", "))} · ${c.members.length} backing part${c.members.length > 1 ? "s" : ""} that sound alike${c.cohesion != null ? ` (agreement ${c.cohesion.toFixed(2)})` : ""}</div>
@@ -161,7 +174,8 @@ function open(i) {
     <div class="actions"><button class="primary" id="confirm">Confirm &amp; next</button><span id="msg"></span></div>
     <p class="keys"><kbd>↑</kbd><kbd>↓</kbd> row · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> play · <kbd>4</kbd> full track · <kbd>Space</kbd> stop ·
       <kbd>A</kbd>/<kbd>B</kbd> same as the 1st/2nd singer · <kbd>N</kbd> new singer · <kbd>F</kbd>/<kbd>M</kbd> its gender ·
-      <kbd>X</kbd> can't tell · <kbd>E</kbd> pitch-shifted / heavy FX · <kbd>O</kbd> odd one out (a part unlike the others) · <kbd>Enter</kbd> confirm · <kbd>←</kbd><kbd>→</kbd> card</p>`;
+      <kbd>X</kbd> can't tell · <kbd>E</kbd> pitch-shifted / heavy FX · <kbd>Enter</kbd> confirm · <kbd>←</kbd><kbd>→</kbd> card<br>
+      the focused part only: <kbd>Shift</kbd>+<kbd>A</kbd>/<kbd>B</kbd> same as the 1st/2nd singer · <kbd>O</kbd> can't tell · <kbd>G</kbd> back to the card's answer</p>`;
   $("#confirm").onclick = confirm;
   drawRows(); drawAnswer(); renderList();
   if ($("#autoplay").checked && rows[focus]) play(focus, 0);
@@ -173,22 +187,28 @@ function drawRows() {
   rows.forEach((r, k) => {
     if (k === 0 && c.refs.length) box.insertAdjacentHTML("beforeend", `<h3>Singers you already named for this artist - to compare with</h3>`);
     if (k === c.refs.length) box.insertAdjacentHTML("beforeend", c.members.length > 1
-      ? `<h3>Backing parts that sound like one singer - your answer below covers all of them</h3>`
+      ? `<h3>Backing parts that sound alike - the answer below covers every part left on "card's answer"; a part that is someone else gets its own</h3>`
       : `<h3>Backing part - your answer below is for this part</h3>`);
     const t = r.t, el = document.createElement("div");
-    el.className = "row" + (r.kind === "ref" ? " ref" : "") + (k === focus ? " focus" : "") + (r.out ? " out" : "");
+    el.className = "row" + (r.kind === "ref" ? " ref" : "") + (k === focus ? " focus" : "")
+      + (r.kind === "part" && r.t.wordless ? " wordless" : "");
     const snips = `<div class="snips">${t.snippets.map((s, j) => `<button data-j="${j}" title="${s[0].toFixed(0)} s">${j + 1}</button>`).join("")}<button class="full" title="the whole track (key 4)">full</button></div>`;
     if (r.kind === "ref") {
       el.innerHTML = `<div class="t"><b>${esc(t.singer)}</b><span>${t.gender || "?"} · ${esc(t.track)} · voice match ${t.score.toFixed(2)}</span></div>${snips}<div class="lyr">sings lead in ${esc(t.folder)}</div>`;
     } else {
       const words = t.wordless ? `<span class="chip">wordless</span>`
         : `<span class="chip ${t.new_lyrics ? "words" : ""}">${t.words} words${t.new_words ? ` · ${t.new_words} the lead never sings` : ""}</span>`;
+      const opts = [["", "card's answer"], ...c.refs.map(x => [`singer:${x.singer}`, `same as ${x.singer}`]),
+                    ["unclear:", "can't tell (leave out)"], ["effected:", "pitch-shifted / FX"]];
+      const sel = t.wordless ? `<i>wordless - not used, no answer needed</i> · `
+        : c.members.length > 1 ? `<select class="own ${r.own ? "set" : ""}">${opts.map(([v, l]) =>
+            `<option value="${esc(v)}" ${key(r.own) === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select> · ` : "";
       el.innerHTML = `<div class="t"><b>${esc(t.track)}</b><span>${esc(t.song)} · ${Math.round(t.sung_sec || 0)} s sung</span><br>${words}</div>${snips}
-        <div class="lyr" title="${esc(t.sample)}">${c.members.length > 1 ? `<label title="this part sounds like someone else than the other parts here: it is left out (can't tell)"><input type="checkbox" ${r.out ? "checked" : ""}> odd one out</label> · ` : ""}${esc(t.sample) || "<i>no words heard</i>"}</div>`;
-      const cb = $("input[type=checkbox]", el);
-      if (cb) cb.onchange = () => { r.out = cb.checked; drawRows(); };
+        <div class="lyr" title="${esc(t.sample)}">${sel}${esc(t.sample) || "<i>no words heard</i>"}</div>`;
+      const s = $("select", el);
+      if (s) s.onchange = () => { setOwn(r, s.value); s.blur(); };
     }
-    el.onclick = e => { if (e.target.tagName !== "INPUT" && focus !== k) { focus = k; markFocus(); } };
+    el.onclick = e => { if (!["INPUT", "SELECT", "OPTION"].includes(e.target.tagName) && focus !== k) { focus = k; markFocus(); } };
     el.querySelectorAll(".snips button[data-j]").forEach(b => b.onclick = e => { e.stopPropagation(); play(k, +b.dataset.j); });
     $(".snips .full", el).onclick = e => { e.stopPropagation(); openFull(k); };
     box.appendChild(el);
@@ -213,6 +233,12 @@ function drawAnswer() {
   inp.oninput = () => { ans.singer = inp.value; ans.typed = true; };
 }
 
+function setOwn(r, v) {
+  if (!r || r.kind !== "part" || r.t.wordless) return;
+  const [verdict, singer] = v ? [v.split(":")[0], v.slice(v.indexOf(":") + 1) || null] : [null, null];
+  r.own = verdict ? { verdict, singer } : null;
+  drawRows();
+}
 function setPlain(v) { ans = { verdict: v, singer: null, gender: null, typed: false }; drawAnswer(); }
 function setSame(s) { ans = { verdict: "singer", singer: s, gender: null, typed: false }; drawAnswer(); }
 function setNew(g) {
@@ -257,19 +283,20 @@ function paintPlaying() {
 
 async function confirm() {
   const m = $("#msg");
-  if (!ans.verdict) { m.className = "err"; m.textContent = "pick an answer first"; return; }
-  if (ans.verdict === "new" && (!ans.gender || !(ans.singer || "").trim())) {
-    m.className = "err"; m.textContent = "a new singer needs F/M and a name"; return; }
   const c = data.cards[cur];
-  const labels = rows.filter(r => r.kind === "part").map(r => r.out
-    ? { id: r.t.id, verdict: "unclear", group: c.key }
-    : ans.verdict === "unclear" || ans.verdict === "effected" ? { id: r.t.id, verdict: ans.verdict, group: c.key }
-    : { id: r.t.id, verdict: ans.verdict, singer: ans.singer && ans.singer.trim(), gender: ans.gender, group: c.key });
+  const parts = rows.filter(r => r.kind === "part" && !r.t.wordless);
+  const needCard = parts.some(r => !r.own);
+  if (needCard && !ans.verdict) { m.className = "err"; m.textContent = "pick an answer first"; return; }
+  if (needCard && ans.verdict === "new" && (!ans.gender || !(ans.singer || "").trim())) {
+    m.className = "err"; m.textContent = "a new singer needs F/M and a name"; return; }
+  const one = a => a.verdict === "unclear" || a.verdict === "effected" ? { verdict: a.verdict }
+    : { verdict: a.verdict, singer: a.singer && a.singer.trim(), gender: a.gender || null };
+  const labels = parts.map(r => ({ id: r.t.id, group: c.key, ...one(r.own || ans) }));
   const res = await fetch("/api/singers/labels", { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labels }) });
   if (!res.ok) { m.className = "err"; m.textContent = "not saved: " + (await res.json()).error; return; }
-  const newly = c.members.filter(x => !x.label).length;
-  c.members.forEach((x, k) => x.label = labels[k]);
+  const newly = parts.filter(r => !r.t.label).length;
+  parts.forEach((r, k) => r.t.label = labels[k]);
   if (!c.done) data.progress.done++;
   data.progress.answered += newly;
   c.done = true;
@@ -292,13 +319,15 @@ document.addEventListener("keydown", e => {
   else if (["1", "2", "3"].includes(k)) play(focus, +k - 1);
   else if (k === "4") openFull(focus);
   else if (k === " ") { e.preventDefault(); playing ? stop() : play(focus, 0); }
+  else if (e.shiftKey && (k === "a" || k === "b")) { const x = c.refs["ab".indexOf(k)]; if (x) setOwn(rows[focus], `singer:${x.singer}`); }
   else if (k === "a" && c.refs[0]) setSame(c.refs[0].singer);
   else if (k === "b" && c.refs[1]) setSame(c.refs[1].singer);
   else if (k === "n") { setNew(ans.gender); $("#vname")?.focus(); e.preventDefault(); }
   else if (k === "f" || k === "m") setNew(k.toUpperCase());
   else if (k === "x") setPlain("unclear");
   else if (k === "e") setPlain("effected");
-  else if (k === "o" && rows[focus]?.kind === "part" && data.cards[cur].members.length > 1) { rows[focus].out = !rows[focus].out; drawRows(); }
+  else if (k === "o") setOwn(rows[focus], rows[focus]?.own?.verdict === "unclear" ? "" : "unclear:");
+  else if (k === "g") setOwn(rows[focus], "");
   else return;
 });
 $("#pending").onchange = renderList;
