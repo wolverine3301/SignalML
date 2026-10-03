@@ -20,10 +20,11 @@ singers recur across its songs - against the singers the reviewer already named:
 * a double (``BackingVox3DT1``) follows the track it doubles (``BackingVox3``) and is
   never asked about.
 
-Only groups holding a backing part with real words are queued for review: wordless
-parts (oohs, aahs) and doubles are not wanted for training (reviewer's call,
-2026-10-03), so their singer does not need a human. Words are counted from the lyrics
-step's transcript with vocables left out.
+Only groups holding a backing part that sings NEW lyrics - words the song's main vocals
+never sing (an answer line, a second singer's verse) - are queued for review. Wordless
+parts (oohs, aahs), parts re-singing the lead's lines and doubles are not wanted for
+training (reviewer's call, 2026-10-03), so their singer does not need a human. Words
+are counted from the lyrics step's transcript with vocables left out.
 
 The model learned voices from speech; high and wordless singing is far from that, so
 scores are only compared inside one artist's tracks (same studio, same mics), and the
@@ -67,6 +68,10 @@ LABELS_FILE = Path("review") / "singers.jsonl"
 CORPUS = "multitrack"
 SPAN_BRIDGE_SEC = 0.3  # gaps shorter than this (breaths, consonant dips) stay in one span
 MIN_LEXICAL = 8  # fewer real words than this: a wordless part (oohs, aahs, "yeah")
+MIN_DISTINCT = 4  # ...or fewer different ones: vocal percussion ("buh buh buh", "bop")
+# new lyrics: at least this many different words the main vocals never sing, making up
+# at least this share of the part's different words (a stray misheard word is not a line)
+NEW_DISTINCT, NEW_SHARE = 5, 0.3
 VERDICTS = ("singer", "new", "unclear")
 UNCLEAR = "singer unclear"  # meta.excluded for a part the reviewer could not place
 
@@ -209,14 +214,20 @@ def _lyrics_text(data_root: Path, rec) -> str | None:
 
 
 def content(text: str | None, main_vocab: set[str]) -> dict:
-    """``{"words", "new_words", "wordless", "sample"}`` for one part. ``new_words`` are
-    real words the song's main vocals never sing (an answer line, a second singer's
-    verse); no transcript at all (Whisper heard under ``min_words``) is wordless."""
+    """``{"words", "new_words", "wordless", "new_lyrics", "sample"}`` for one part.
+
+    ``new_words`` are the different real words the song's main vocals never sing; no
+    transcript at all (Whisper heard under ``min_words``) is wordless."""
     if text is None:
-        return {"words": 0, "new_words": 0, "wordless": True, "sample": ""}
+        return {"words": 0, "new_words": 0, "wordless": True, "new_lyrics": False,
+                "sample": ""}
     lex = lexical_words(text)
-    return {"words": len(lex), "new_words": sum(w not in main_vocab for w in lex),
-            "wordless": len(lex) < MIN_LEXICAL,
+    distinct = set(lex)
+    new = distinct - main_vocab
+    wordless = len(lex) < MIN_LEXICAL or len(distinct) < MIN_DISTINCT
+    return {"words": len(lex), "new_words": len(new), "wordless": wordless,
+            "new_lyrics": not wordless and len(new) >= NEW_DISTINCT
+            and len(new) >= NEW_SHARE * len(distinct),
             "sample": " / ".join(line.strip() for line in text.splitlines() if line.strip())[:160]}
 
 
@@ -407,7 +418,7 @@ def match(tracks: list[Track], cfg: SingersConfig) -> MatchResult:
                 "cohesion": round(float(np.mean(inner)), 3) if inner else None,
                 "nearest": [{"singer": s, "gender": genders.get(s), "score": round(v, 3)}
                             for v, s in near],
-                "needs_review": any(not m.content.get("wordless", True) for m in members),
+                "needs_review": any(m.content.get("new_lyrics") for m in members),
             })
     return res
 

@@ -15,6 +15,12 @@ and every song still has to clear the alignment gate before it reaches a dataset
 Hand-written lyrics are never overwritten: a record that already has lyrics without an
 ``asr:`` source is skipped even with ``force``.
 
+Whisper's stock hallucinations ("you", "Thank you.", "Thanks for watching") are dropped
+when they make up a whole segment: over silence, breaths and wordless singing they are
+what Whisper emits, and alignment would pin each one to a breath or a held "ooh". The
+dropped segments stay in ``asr.json`` (``dropped_segments``). ``scrub`` applies the same
+filter to transcripts written before it existed.
+
 Whisper is an external tool in its own venv (``scripts/whisper_lyrics.py``), invoked by
 command like MFA and the trainer — one invocation per batch so the model loads once.
 """
@@ -33,7 +39,7 @@ import yaml
 from pydantic import BaseModel
 
 from ..config import CONFIGS_DIR
-from ..manifest import Manifest, ManifestRecord
+from ..manifest import MANIFEST_NAME, Manifest, ManifestRecord, _manifest_lock
 from .common import song_dir, update_analysis
 
 LYRICS_NAME = "lyrics.txt"
@@ -94,6 +100,28 @@ def loop_flag(stats: dict) -> str | None:
     if stats["max_consecutive_repeat"] >= 4:
         return f"same line {stats['max_consecutive_repeat']}x in a row (likely a loop)"
     return None
+
+
+# Whole segments only - a sung "you" inside a line stays. On a first multitrack library
+# (2026-10-03) such segments sat in 2 of 3 machine transcripts: 0.2 s long at the median
+# against 3.5 s for the rest, no-speech probability 0.73 against 0.33.
+HALLUCINATION = re.compile(
+    r"(you|thank you( so much)?( for watching)?|thanks for watching|bye|"
+    r"transcription by castingwords|subtitles by .*)[.!]*")
+
+
+def drop_hallucinations(segments: list[dict]) -> tuple[list[dict], list[dict]]:
+    """``(kept, dropped)``: a segment whose whole text is a known Whisper hallucination
+    is dropped."""
+    kept, dropped = [], []
+    for seg in segments:
+        text = seg["text"].strip().lower()
+        (dropped if HALLUCINATION.fullmatch(text) else kept).append(seg)
+    return kept, dropped
+
+
+def _transcript(segments: list[dict]) -> str:
+    return "\n".join(s["text"].strip() for s in segments if s["text"].strip())
 
 
 def _default_runner(argv: list[str], cwd: str | None, timeout: float) -> None:
@@ -188,7 +216,8 @@ def run(
             payload = results[rec.id]
             if isinstance(payload, str):
                 raise RuntimeError(payload)
-            segments = payload.get("segments", [])
+            segments, dropped = drop_hallucinations(payload.get("segments", []))
+            payload = {**payload, "segments": segments, "dropped_segments": dropped}
             stats = lyrics_stats(segments)
             if stats["n_words"] < cfg.min_words:
                 raise RuntimeError(f"only {stats['n_words']} words recognised "
@@ -196,14 +225,13 @@ def run(
             sdir = song_dir(data_root, rec.id)
             ldir = sdir / "lyrics"
             ldir.mkdir(parents=True, exist_ok=True)
-            text = "\n".join(s["text"].strip() for s in segments if s["text"].strip())
-            (ldir / LYRICS_NAME).write_text(text + "\n", encoding="utf-8")
+            (ldir / LYRICS_NAME).write_text(_transcript(segments) + "\n", encoding="utf-8")
             (ldir / ASR_NAME).write_text(json.dumps(payload, ensure_ascii=False, indent=1),
                                          encoding="utf-8")
             source = f"{ASR_PREFIX}{payload.get('model') or 'whisper'}"
             flag = loop_flag(stats)
             update_analysis(sdir, "lyrics", {
-                "source": source, **stats, "flag": flag,
+                "source": source, **stats, "flag": flag, "hallucinations_dropped": len(dropped),
                 "date": _dt.date.today().isoformat()})
             rec.meta.has_lyrics = True
             rec.meta.lyrics_path = (ldir / LYRICS_NAME).relative_to(data_root).as_posix()
@@ -214,4 +242,72 @@ def run(
                 summary.flagged[rec.id] = flag
         except Exception as exc:  # one bad song must not kill the batch
             summary.failed[rec.id] = str(exc)
+    return summary
+
+
+@dataclass
+class ScrubSummary:
+    cleaned: list[str] = field(default_factory=list)  # transcript rewritten: align again
+    emptied: list[str] = field(default_factory=list)  # nothing real left: no lyrics now
+
+
+def scrub(data_root: str | Path, *, cfg: LyricsConfig | None = None,
+          ids: list[str] | None = None, dry_run: bool = False) -> ScrubSummary:
+    """Drop hallucinated segments from machine lyrics written before the filter existed.
+
+    A rewritten transcript must be aligned again, so ``aligned`` is cleared - a locked
+    manifest edit, since stage commits only ever set flags. One left with fewer than
+    ``min_words`` loses its lyrics, exactly like a transcription that failed (it was
+    wordless singing). Hand-written lyrics are never touched.
+    """
+    data_root = Path(data_root)
+    cfg = cfg or load_lyrics_config()
+    summary = ScrubSummary()
+    for rec in Manifest.for_data_root(data_root).records:
+        if ids and rec.id not in ids:
+            continue
+        if not (rec.meta.lyrics_source or "").startswith(ASR_PREFIX):
+            continue
+        sdir = song_dir(data_root, rec.id)
+        asr_path = sdir / "lyrics" / ASR_NAME
+        if not asr_path.exists():
+            continue
+        payload = json.loads(asr_path.read_text(encoding="utf-8"))
+        kept, dropped = drop_hallucinations(payload.get("segments", []))
+        if not dropped:
+            continue
+        stats = lyrics_stats(kept)
+        empty = stats["n_words"] < cfg.min_words
+        (summary.emptied if empty else summary.cleaned).append(rec.id)
+        if dry_run:
+            continue
+        payload = {**payload, "segments": kept,
+                   "dropped_segments": payload.get("dropped_segments", []) + dropped}
+        asr_path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        if empty:
+            (sdir / "lyrics" / LYRICS_NAME).unlink(missing_ok=True)
+        else:
+            (sdir / "lyrics" / LYRICS_NAME).write_text(_transcript(kept) + "\n",
+                                                        encoding="utf-8")
+        analysis = sdir / "analysis.json"
+        prev = json.loads(analysis.read_text(encoding="utf-8")).get("lyrics", {}) \
+            if analysis.exists() else {}
+        update_analysis(sdir, "lyrics", {
+            **prev, **stats, "flag": loop_flag(stats),
+            "hallucinations_dropped": prev.get("hallucinations_dropped", 0) + len(dropped),
+            "scrubbed": _dt.date.today().isoformat(),
+            **({"failed": f"only {stats['n_words']} words after dropping hallucinations"}
+               if empty else {})})
+    if dry_run or not (summary.cleaned or summary.emptied):
+        return summary
+    path = data_root / MANIFEST_NAME
+    with _manifest_lock(path):
+        manifest = Manifest(path)
+        for rid in summary.cleaned + summary.emptied:
+            rec = manifest.get(rid)
+            rec.status.aligned = False
+            if rid in summary.emptied:
+                rec.meta.has_lyrics = False
+                rec.meta.lyrics_path = rec.meta.lyrics_source = None
+        manifest.save()
     return summary

@@ -757,6 +757,17 @@ def _cmd_lyrics(args: argparse.Namespace) -> int:
             print(f"  FAILED {rid}: {why}", file=sys.stderr)
         return 1 if s.failed and not s.checked else 0
 
+    if args.scrub:
+        from .stages.lyrics import scrub
+
+        sc = scrub(resolve_data_root(args.data_root), cfg=load_lyrics_config(args.config),
+                   ids=args.ids or None, dry_run=args.dry_run)
+        verb = "would be" if args.dry_run else "were"
+        print(f"lyrics --scrub: {len(sc.cleaned)} transcript(s) {verb} cleaned of "
+              f"hallucinations (aligned cleared: align them again), {len(sc.emptied)} "
+              f"left wordless (lyrics removed)")
+        return 0
+
     if args.resolve:
         from .stages.lyrics_resolve import run_resolve
 
@@ -1639,6 +1650,10 @@ def main(argv: list[str] | None = None) -> int:
     ly_p.add_argument("--check", action="store_true",
                       help="compare HUMAN lyrics with what is sung and write a review file "
                            "of departures (repeats, ad-libs, skipped lines); lyrics untouched")
+    ly_p.add_argument("--scrub", action="store_true",
+                      help="drop Whisper hallucinations ('you', 'Thank you.') from machine "
+                           "lyrics written before the filter; clears `aligned` on changed songs")
+    ly_p.add_argument("--dry-run", action="store_true", help="--scrub: count, change nothing")
     ly_p.add_argument("--resolve", action="store_true",
                       help="decide per (parenthesised) group and per unheard line what "
                            "was sung, from lyrics/asr.json; writes lyrics/resolved.txt "

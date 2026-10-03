@@ -179,7 +179,8 @@ function drawRows() {
     if (r.kind === "ref") {
       el.innerHTML = `<div class="t"><b>${esc(t.singer)}</b><span>${t.gender || "?"} · ${esc(t.track)} · voice match ${t.score.toFixed(2)}</span></div>${snips}<div class="lyr">sings lead in ${esc(t.folder)}</div>`;
     } else {
-      const words = t.wordless ? `<span class="chip">wordless</span>` : `<span class="chip words">${t.words} words${t.new_words ? `, ${t.new_words} not in the lead` : ""}</span>`;
+      const words = t.wordless ? `<span class="chip">wordless</span>`
+        : `<span class="chip ${t.new_lyrics ? "words" : ""}">${t.words} words${t.new_words ? ` · ${t.new_words} the lead never sings` : ""}</span>`;
       el.innerHTML = `<div class="t"><b>${esc(t.track)}</b><span>${esc(t.song)} · ${Math.round(t.sung_sec || 0)} s sung</span><br>${words}</div>${snips}
         <div class="lyr" title="${esc(t.sample)}"><label><input type="checkbox" ${r.out ? "checked" : ""}> not this voice</label> · ${esc(t.sample) || "<i>no words heard</i>"}</div>`;
       const cb = $("input[type=checkbox]", el);

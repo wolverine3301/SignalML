@@ -9,7 +9,14 @@ from pathlib import Path
 import pytest
 
 from signalml.manifest import Manifest, scan_directory
-from signalml.stages.lyrics import LyricsConfig, loop_flag, lyrics_stats, run
+from signalml.stages.lyrics import (
+    LyricsConfig,
+    drop_hallucinations,
+    loop_flag,
+    lyrics_stats,
+    run,
+    scrub,
+)
 
 CFG = LyricsConfig(command=["whisper", "--jobs", "{jobs}"])
 LINE = "hold me close and never let me go tonight"
@@ -107,3 +114,68 @@ def test_stats_and_flag():
     st = lyrics_stats(segs)
     assert st["max_consecutive_repeat"] == 2 and st["n_words"] == 5
     assert loop_flag(st) is None
+
+
+HALLUCINATED = [{"start": 0.0, "end": 0.2, "text": " you"},
+                {"start": 1.0, "end": 4.0, "text": LINE},
+                {"start": 5.0, "end": 5.2, "text": " Thank you."},
+                {"start": 6.0, "end": 9.0, "text": "you are the one I want to hold"},
+                {"start": 9.5, "end": 9.7, "text": "Thanks for watching!"}]
+
+
+def test_whisper_hallucinations_dropped():
+    kept, dropped = drop_hallucinations(HALLUCINATED)
+    # whole-segment stock phrases go; a real line that starts with "you" stays
+    assert [s["text"] for s in kept] == [LINE, "you are the one I want to hold"]
+    assert len(dropped) == 3
+
+
+def test_run_drops_hallucinations_and_keeps_them_in_asr(tmp_path, make_wav):
+    root = tmp_path / "dr"
+    rid = _song(root, make_wav, "a")
+    run(root, cfg=CFG, runner=_fake({rid: HALLUCINATED}))
+    ldir = root / "songs" / rid / "lyrics"
+    assert ldir.joinpath("lyrics.txt").read_text(encoding="utf-8").splitlines() == \
+        [LINE, "you are the one I want to hold"]
+    assert len(json.loads(ldir.joinpath("asr.json").read_text())["dropped_segments"]) == 3
+
+
+def test_scrub_rewrites_old_transcripts(tmp_path, make_wav):
+    root = tmp_path / "dr"
+    keep, empty = (_song(root, make_wav, n) for n in ("keep", "empty"))
+    human = _song(root, make_wav, "human", lyrics="my own corrected lyrics here")
+    junk = [{"start": i, "end": i + 0.2, "text": "Thank you."} for i in range(4)]
+    run(root, cfg=CFG, runner=_fake({keep: [], empty: []}))  # placeholders, rewritten below
+    m = Manifest.for_data_root(root)
+    for rid, segs in ((keep, HALLUCINATED), (empty, junk + [{"start": 9, "end": 10,
+                                                              "text": "oh my love"}])):
+        # what a transcript written before the filter looked like
+        ldir = root / "songs" / rid / "lyrics"
+        ldir.mkdir(parents=True, exist_ok=True)
+        ldir.joinpath("asr.json").write_text(json.dumps({"model": "large-v3", "segments": segs}))
+        ldir.joinpath("lyrics.txt").write_text("\n".join(s["text"] for s in segs))
+        rec = m.get(rid)
+        rec.meta.has_lyrics, rec.meta.lyrics_source = True, "asr:large-v3"
+        rec.meta.lyrics_path = f"songs/{rid}/lyrics/lyrics.txt"
+        rec.status.aligned = True
+        m.upsert(rec)
+    hrec = m.get(human)
+    hrec.status.aligned = True
+    m.upsert(hrec)
+    m.save()
+    hdir = root / "songs" / human / "lyrics"
+    hdir.mkdir(parents=True, exist_ok=True)
+    hdir.joinpath("asr.json").write_text(json.dumps({"segments": HALLUCINATED}))
+
+    assert scrub(root, cfg=CFG, dry_run=True).cleaned == [keep]
+    s = scrub(root, cfg=CFG)
+    assert (s.cleaned, s.emptied) == ([keep], [empty])
+    m = Manifest.for_data_root(root)
+    assert not m.get(keep).status.aligned and m.get(keep).meta.has_lyrics  # align again
+    assert not m.get(empty).meta.has_lyrics and m.get(empty).meta.lyrics_path is None
+    assert not (root / "songs" / empty / "lyrics" / "lyrics.txt").exists()
+    assert m.get(human).status.aligned  # hand-written lyrics: never touched
+    assert "you are the one" in (root / "songs" / keep / "lyrics" / "lyrics.txt").read_text()
+    analysis = json.loads((root / "songs" / keep / "analysis.json").read_text())
+    assert analysis["lyrics"]["hallucinations_dropped"] == 3
+    assert scrub(root, cfg=CFG).cleaned == []  # idempotent

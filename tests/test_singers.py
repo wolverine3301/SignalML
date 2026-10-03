@@ -216,3 +216,15 @@ def test_server_singers_page(data_root):
         server.shutdown()
         server.server_close()
     assert singers.label_store(data_root).load()["sng_9102"]["verdict"] == "singer"
+
+
+def test_content_wordless_and_new_lyrics():
+    vocab = set(singers.lexical_words(LEAD_WORDS))
+    # vocal percussion: plenty of "words", hardly any different ones
+    assert singers.content("buh buh buh bop bop " * 10, vocab)["wordless"]
+    resung = singers.content("I walk the harbor line tonight and every lantern knows", vocab)
+    assert not resung["wordless"] and not resung["new_lyrics"]  # the lead's own line
+    one_new = singers.content("I walk the harbor line tonight and every lantern glows", vocab)
+    assert not one_new["new_lyrics"]  # one misheard word is not a new line
+    answer = singers.content("silver birds are calling over the water tonight", vocab)
+    assert answer["new_lyrics"] and answer["new_words"] == 6
