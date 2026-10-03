@@ -228,3 +228,27 @@ def test_content_wordless_and_new_lyrics():
     assert not one_new["new_lyrics"]  # one misheard word is not a new line
     answer = singers.content("silver birds are calling over the water tonight", vocab)
     assert answer["new_lyrics"] and answer["new_words"] == 6
+
+
+def test_effected_parts_and_anchors(data_root):
+    """A pitch-shifted part is tagged processing=heavy (its double too) and gets no
+    singer; heavy tracks never serve as a named singer's voice."""
+    singers.run_match(data_root, singers.SingersConfig())
+    known = singers.known_ids(data_root)
+    singers.label_store(data_root).append([singers.validate_label(
+        {"id": rid, "verdict": "effected", "singer": "ignored", "gender": "F"}, known)
+        for rid in ("sng_9102", "sng_9106")])
+    manifest, _ = singers.apply(data_root)
+    manifest.save()
+    m = Manifest.for_data_root(data_root)
+    for rid in ("sng_9102", "sng_9103", "sng_9106"):
+        assert (m.get(rid).meta.processing, m.get(rid).meta.singer) == ("heavy", None)
+    assert m.get("sng_9101").meta.processing is None  # auto-assigned: processing untouched
+
+    # a heavy lead is no reference: the band's only named voice disappears from matching
+    lead = m.get("sng_9100")
+    lead.meta.processing = "heavy"
+    m.upsert(lead)
+    m.save()
+    tracks = {t.id for t in singers.load_tracks(data_root)}
+    assert "sng_9100" not in tracks and "sng_9102" not in tracks

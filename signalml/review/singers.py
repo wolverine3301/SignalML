@@ -20,6 +20,10 @@ singers recur across its songs - against the singers the reviewer already named:
 * a double (``BackingVox3DT1``) follows the track it doubles (``BackingVox3``) and is
   never asked about.
 
+Tracks tagged ``processing: heavy`` (identity review's "effected": heavy FX, pitch-shifted,
+a voice played as an instrument) take no part: their voiceprint is not the singer's.
+The reviewer can tag a backing part the same way (verdict ``effected``).
+
 Only groups holding a backing part that sings NEW lyrics - words the song's main vocals
 never sing (an answer line, a second singer's verse) - are queued for review. Wordless
 parts (oohs, aahs), parts re-singing the lead's lines and doubles are not wanted for
@@ -54,6 +58,7 @@ from .identity import (
     MAIN_ROLES,
     SNIPPET_CACHE,
     LabelStore,
+    _import_processing,
     _load_cache,
     _save_cache,
     _snippets,
@@ -72,7 +77,8 @@ MIN_DISTINCT = 4  # ...or fewer different ones: vocal percussion ("buh buh buh",
 # new lyrics: at least this many different words the main vocals never sing, making up
 # at least this share of the part's different words (a stray misheard word is not a line)
 NEW_DISTINCT, NEW_SHARE = 5, 0.3
-VERDICTS = ("singer", "new", "unclear")
+VERDICTS = ("singer", "new", "unclear", "effected")
+UNNAMED = ("unclear", "effected")  # verdicts that leave the part without a singer
 UNCLEAR = "singer unclear"  # meta.excluded for a part the reviewer could not place
 
 
@@ -263,7 +269,7 @@ def load_tracks(data_root: str | Path, cfg: SingersConfig | None = None) -> list
     out: list[Track] = []
     texts: dict[str, str | None] = {}
     for rec in manifest.records:
-        if rec.meta.corpus != CORPUS or rec.meta.excluded:
+        if rec.meta.corpus != CORPUS or rec.meta.excluded or rec.meta.processing == "heavy":
             continue
         sdir = song_dir(data_root, rec.id)
         info = _analysis(sdir).get("separate", {}).get("multitrack")
@@ -474,7 +480,8 @@ def build_cards(data_root: str | Path) -> dict:
     refs_by_artist: dict[str, list] = defaultdict(list)  # named tracks to compare with
     names: dict[str, str] = {}
     for rec in manifest.records:
-        if rec.meta.corpus != CORPUS or rec.meta.excluded or not rec.meta.singer:
+        if rec.meta.corpus != CORPUS or rec.meta.excluded or not rec.meta.singer \
+                or rec.meta.processing == "heavy":
             continue
         info = _analysis(song_dir(data_root, rec.id)).get("separate", {}).get("multitrack")
         if info and info.get("role") in ("lead", "vocal"):
@@ -519,7 +526,8 @@ def build_cards(data_root: str | Path) -> dict:
 
 def validate_label(label: dict, known_ids: set[str]) -> dict:
     """One posted answer, per track: ``verdict`` singer (an existing singer id), new (a
-    name + gender) or unclear (the part is left out of training)."""
+    name + gender), unclear (left out of training) or effected (pitch-shifted / heavy FX:
+    ``processing: heavy``, which recipes leave out by default)."""
     rid = label.get("id")
     if rid not in known_ids:
         raise ValueError(f"unknown record {rid!r}")
@@ -527,8 +535,8 @@ def validate_label(label: dict, known_ids: set[str]) -> dict:
     if verdict not in VERDICTS:
         raise ValueError(f"verdict must be one of {VERDICTS}, got {verdict!r}")
     singer = label.get("singer")
-    if verdict != "unclear" and (not isinstance(singer, str) or not singer.strip()
-                                 or len(singer) > 80):
+    if verdict not in UNNAMED and (not isinstance(singer, str) or not singer.strip()
+                                   or len(singer) > 80):
         raise ValueError("singer must be a non-empty string of at most 80 characters")
     gender = label.get("gender")
     if gender not in ("F", "M", None):
@@ -536,8 +544,8 @@ def validate_label(label: dict, known_ids: set[str]) -> dict:
     if verdict == "new" and gender is None:
         raise ValueError("a new singer needs a gender")
     return {"id": rid, "verdict": verdict, "group": label.get("group"),
-            "singer": _normalize_singer(singer) if verdict != "unclear" else None,
-            "gender": gender if verdict != "unclear" else None}
+            "singer": _normalize_singer(singer) if verdict not in UNNAMED else None,
+            "gender": gender if verdict not in UNNAMED else None}
 
 
 def known_ids(data_root: str | Path) -> set[str]:
@@ -569,6 +577,9 @@ def apply(data_root: str | Path, *,
     for rid, lab in labels.items():
         if lab["verdict"] == "unclear":
             decided[rid] = {"singer": None, "gender": None, "excluded": UNCLEAR, "source": "review"}
+        elif lab["verdict"] == "effected":
+            decided[rid] = {"singer": None, "gender": None, "excluded": None,
+                            "processing": "heavy", "source": "review"}
         else:
             gender = lab["gender"] if lab["verdict"] == "new" else (
                 singer_gender.get(lab["singer"]) or lab["gender"])
@@ -594,7 +605,8 @@ def apply(data_root: str | Path, *,
             continue  # a human identity label
         if rec.meta.excluded and rec.meta.excluded != UNCLEAR:
             continue  # excluded for another reason - leave it alone
-        new = {"singer": d["singer"], "gender": d["gender"], "excluded": d["excluded"]}
+        new = {"singer": d["singer"], "gender": d["gender"], "excluded": d["excluded"],
+               "processing": d.get("processing") or _import_processing(rec)}
         diff = {k: (getattr(rec.meta, k), v) for k, v in new.items() if getattr(rec.meta, k) != v}
         if not diff:
             continue

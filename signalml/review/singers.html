@@ -161,7 +161,7 @@ function open(i) {
     <div class="actions"><button class="primary" id="confirm">Confirm &amp; next</button><span id="msg"></span></div>
     <p class="keys"><kbd>↑</kbd><kbd>↓</kbd> row · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> play · <kbd>4</kbd> full track · <kbd>Space</kbd> stop ·
       <kbd>A</kbd>/<kbd>B</kbd> same as the 1st/2nd singer · <kbd>N</kbd> new singer · <kbd>F</kbd>/<kbd>M</kbd> its gender ·
-      <kbd>X</kbd> can't tell · <kbd>O</kbd> odd one out (a part unlike the others) · <kbd>Enter</kbd> confirm · <kbd>←</kbd><kbd>→</kbd> card</p>`;
+      <kbd>X</kbd> can't tell · <kbd>E</kbd> pitch-shifted / heavy FX · <kbd>O</kbd> odd one out (a part unlike the others) · <kbd>Enter</kbd> confirm · <kbd>←</kbd><kbd>→</kbd> card</p>`;
   $("#confirm").onclick = confirm;
   drawRows(); drawAnswer(); renderList();
   if ($("#autoplay").checked && rows[focus]) play(focus, 0);
@@ -202,15 +202,18 @@ function drawAnswer() {
     <span class="newbox"><button class="v ${ans.verdict === "new" ? "on" : ""}" id="vnew"><kbd>N</kbd> new singer</button>
       <span class="seg">${["F", "M"].map(g => `<button data-g="${g}" class="${ans.verdict === "new" && ans.gender === g ? "on" : ""}">${g}</button>`).join("")}</span>
       <input type="text" id="vname" placeholder="name" value="${esc(ans.verdict === "new" ? ans.singer || "" : "")}" ${ans.verdict === "new" ? "" : "disabled"}></span>
-    <button class="v ${ans.verdict === "unclear" ? "on" : ""}" id="vunclear"><kbd>X</kbd> can't tell (leave out)</button>`;
+    <button class="v ${ans.verdict === "unclear" ? "on" : ""}" id="vunclear"><kbd>X</kbd> can't tell (leave out)</button>
+    <button class="v ${ans.verdict === "effected" ? "on" : ""}" id="veffected" title="pitch-shifted, heavy FX or a voice used as an instrument: left out of training, reversible"><kbd>E</kbd> pitch-shifted / heavy FX</button>`;
   box.querySelectorAll("button[data-s]").forEach(b => b.onclick = () => setSame(b.dataset.s));
   $("#vnew").onclick = () => setNew(ans.gender);
   box.querySelectorAll(".seg button").forEach(b => b.onclick = () => setNew(b.dataset.g));
-  $("#vunclear").onclick = () => { ans = { verdict: "unclear", singer: null, gender: null, typed: false }; drawAnswer(); };
+  $("#vunclear").onclick = () => setPlain("unclear");
+  $("#veffected").onclick = () => setPlain("effected");
   const inp = $("#vname");
   inp.oninput = () => { ans.singer = inp.value; ans.typed = true; };
 }
 
+function setPlain(v) { ans = { verdict: v, singer: null, gender: null, typed: false }; drawAnswer(); }
 function setSame(s) { ans = { verdict: "singer", singer: s, gender: null, typed: false }; drawAnswer(); }
 function setNew(g) {
   const keep = ans.verdict === "new" && ans.typed;
@@ -260,6 +263,7 @@ async function confirm() {
   const c = data.cards[cur];
   const labels = rows.filter(r => r.kind === "part").map(r => r.out
     ? { id: r.t.id, verdict: "unclear", group: c.key }
+    : ans.verdict === "unclear" || ans.verdict === "effected" ? { id: r.t.id, verdict: ans.verdict, group: c.key }
     : { id: r.t.id, verdict: ans.verdict, singer: ans.singer && ans.singer.trim(), gender: ans.gender, group: c.key });
   const res = await fetch("/api/singers/labels", { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labels }) });
@@ -292,7 +296,8 @@ document.addEventListener("keydown", e => {
   else if (k === "b" && c.refs[1]) setSame(c.refs[1].singer);
   else if (k === "n") { setNew(ans.gender); $("#vname")?.focus(); e.preventDefault(); }
   else if (k === "f" || k === "m") setNew(k.toUpperCase());
-  else if (k === "x") { ans = { verdict: "unclear", singer: null, gender: null, typed: false }; drawAnswer(); }
+  else if (k === "x") setPlain("unclear");
+  else if (k === "e") setPlain("effected");
   else if (k === "o" && rows[focus]?.kind === "part" && data.cards[cur].members.length > 1) { rows[focus].out = !rows[focus].out; drawRows(); }
   else return;
 });
