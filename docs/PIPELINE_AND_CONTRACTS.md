@@ -86,7 +86,9 @@ DATA_ROOT/
 │   ├── clean/vocals.wav      # post-S4 normalized vocal
 │   ├── align/
 │   │   ├── vocals.TextGrid   # aligner-native intermediate (kept for audit)
-│   │   └── phones.json       # pipeline-native alignment (§S5)
+│   │   ├── phones.json       # pipeline-native alignment (§S5)
+│   │   ├── utterances.json   # align --phrases: phrase windows + alignment health
+│   │   └── quality.json      # signalml quality: per-phrase audio quality (§S5)
 │   ├── features/
 │   │   └── vocals.npz        # named-key features (§S6)
 │   ├── score.json            # when a score exists for this song (§4)
@@ -178,6 +180,7 @@ for audit. All other stages consume/update it.
 | Tool | **MFA** (conda env, native Windows per Q5) with the **`english_mfa` IPA acoustic model + dictionary**; **SOFA** as singing-tuned fallback (P5 runs a head-to-head eval). Gaelic: no pretrained MFA model — custom dictionary/acoustic training, wave-2 (Q13) |
 | Output | aligner-native intermediate (`align/vocals.TextGrid`, kept for audit) → converted to **`align/phones.json`**: `[{"ph": "aɪ", "start": 1.02, "end": 1.19, "word": "I", "stress": 1}, ...]` with header `{"phone_set": "mfa_ipa/en_v1", "aligner": "mfa-3.x", "language": "en"}` |
 | Invariants | downstream stages read **only** `phones.json` — swapping aligners (or adding Gaelic) = one new converter/config, nothing downstream changes; alignment confidence recorded to `quality.align_score` so bad alignments can be excluded from training; `phone_set` is versioned to leave room for the future project-owned universal IPA subset (OPEN_QUESTIONS *Future direction*) |
+| Phrase quality | `signalml quality` writes `align/quality<suffix>.json` beside each `utterances<suffix>.json`: one entry per phrase (same order, window copied in so a re-alignment reads as stale) with `hnr_db`, `voiced`, `tail_db`, `gap_db`, measured on `clean/vocals.wav` over the sung span. The dataset's phrase gate reads `hnr_db` (`phrase_gate.min_hnr_db`, separated audio only by default) - quality is judged per phrase, never per song |
 
 ### S6 · features — `signalml features`
 | | |

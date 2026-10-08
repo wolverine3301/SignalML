@@ -482,6 +482,19 @@ def _cmd_align(args: argparse.Namespace) -> int:
     return 0 if not summary.failed else 1
 
 
+def _cmd_quality(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .stages.phrase_quality import measure_quality
+
+    summary = measure_quality(resolve_data_root(args.data_root), force=args.force,
+                              limit=args.limit, ids=args.ids or None)
+    print(f"quality: {len(summary.measured)} measured, {len(summary.skipped)} skipped, "
+          f"{len(summary.failed)} failed")
+    for label, err in summary.failed.items():
+        print(f"  FAILED {label}: {err}", file=sys.stderr)
+    return 0 if not summary.failed else 1
+
+
 def _cmd_eval_align(args: argparse.Namespace) -> int:
     from .evaluation.runner import collect_align_scores, load_song_map, run_jamendolyrics
     from .manifest import resolve_data_root
@@ -1462,6 +1475,17 @@ def main(argv: list[str] | None = None) -> int:
                               "alignment instead of replacing it (manifest untouched)")
     align_p.add_argument("--ids", nargs="*", default=None, help="only these song ids")
     align_p.set_defaults(func=_cmd_align)
+
+    # quality (per-phrase audio quality for the dataset's phrase gate)
+    quality_p = subparsers.add_parser(
+        "quality", help="[P5] per-phrase audio quality (HNR...) -> align/quality*.json")
+    quality_p.add_argument("--data-root", default=None,
+                           help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    quality_p.add_argument("--force", action="store_true",
+                           help="re-measure phrases that already have a current file")
+    quality_p.add_argument("--limit", type=int, default=None, help="max files this run")
+    quality_p.add_argument("--ids", nargs="*", default=None, help="only these song ids")
+    quality_p.set_defaults(func=_cmd_quality)
 
     # eval (P5.4 aligner comparison — docs/notes/aligner_eval.md)
     eval_p = subparsers.add_parser("eval", help="[P5] measure alignment against ground truth")

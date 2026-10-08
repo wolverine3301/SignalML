@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field, field_validator
 from ..config import CONFIGS_DIR, active_profile
 from ..manifest import Manifest, ManifestRecord
 from .common import song_dir
+from .phrase_quality import load_quality, quality_name
 
 SP = "SP"  # silence token (DiffSinger global phoneme)
 AP = "AP"  # aspiration token (reserved; we do not detect breaths yet)
@@ -184,6 +185,15 @@ class PhraseGate(BaseModel):
     # lyrics 4-7% of lines come out unsure, nearly all Whisper missing a sung line
     # (2026-09-26), so this mostly throws good phrases away.
     drop_unsure_lyrics: bool = False
+    # Audio quality (needs `signalml quality`, which writes align/quality*.json beside
+    # the utterances): a phrase whose median HNR is under this is left out - bleed,
+    # separation warble, stacked voices. A blind listening calibration (2026-10-08)
+    # put it at 13 dB. Judged per phrase on purpose: separated songs often hold clean
+    # and damaged stretches side by side. Applies only to records whose
+    # `source_quality` is in `quality_scope`; a song in scope without a current quality
+    # file is skipped rather than let through ungated.
+    min_hnr_db: float | None = None
+    quality_scope: list[str] = ["separated"]
 
 
 def phrase_fails(u: dict, gate: PhraseGate) -> str | None:
@@ -197,6 +207,9 @@ def phrase_fails(u: dict, gate: PhraseGate) -> str | None:
         return "floor_run"
     if gate.max_phone_sec is not None and (u.get("max_phone_sec") or 0) > gate.max_phone_sec:
         return "long_phone"
+    if (gate.min_hnr_db is not None and u.get("hnr_db") is not None
+            and u["hnr_db"] < gate.min_hnr_db):
+        return "low_hnr"
     return None
 
 
@@ -556,7 +569,16 @@ def _cut_all(
                 summary.skipped[rec.id] = (f"phrase_gate on but no {utts_path.name} "
                                            f"(align --phrases writes it)")
                 continue
-            for u in json.loads(utts_path.read_text(encoding="utf-8")):
+            utts = json.loads(utts_path.read_text(encoding="utf-8"))
+            if gate.min_hnr_db is not None and rec.meta.source_quality in gate.quality_scope:
+                quality = load_quality(utts_path.parent, utts_path.name, utts)
+                if quality is None:
+                    summary.skipped[rec.id] = (
+                        f"phrase_gate min_hnr_db on but no current "
+                        f"{quality_name(utts_path.name)} (signalml quality writes it)")
+                    continue
+                utts = [{**u, "hnr_db": q["hnr_db"]} for u, q in zip(utts, quality)]
+            for u in utts:
                 why = phrase_fails(u, gate)
                 if why:
                     blocked.append((u["start"], u["end"]))

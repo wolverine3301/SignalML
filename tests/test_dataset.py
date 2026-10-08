@@ -642,6 +642,67 @@ class TestPhraseGate:
         s = build(root, recipe=r, force=True)
         assert s.songs_used == [sid] and s.gated_phrases == {"floor_frac": 1}
 
+    def test_phrase_fails_on_low_hnr(self):
+        from signalml.stages.dataset import PhraseGate, phrase_fails
+
+        u = dict(self.UTTS[0], hnr_db=9.0)
+        assert phrase_fails(u, PhraseGate(enabled=True, min_hnr_db=13.0)) == "low_hnr"
+        assert phrase_fails(u, PhraseGate(enabled=True)) is None  # opt-in
+        unmeasured = dict(self.UTTS[0], hnr_db=None)  # too little voicing to score
+        assert phrase_fails(unmeasured, PhraseGate(enabled=True, min_hnr_db=13.0)) is None
+
+    def _noisy_middle_song(self, root, make_wav, source_quality):
+        """TIGHT phones over a sine; the middle phrase (1.5-2.5 s) buried in noise."""
+        import numpy as np
+
+        from signalml.stages.phrase_quality import measure_quality
+
+        sid = _ready_song(root, make_wav, phones=self.TIGHT)
+        m = Manifest.for_data_root(root)
+        rec = m.get(sid)
+        rec.meta.source_quality = source_quality
+        m.upsert(rec)
+        m.save()
+        sdir = song_dir(root, sid)
+        y, sr = sf.read(str(sdir / "clean" / "vocals.wav"), dtype="float32")
+        a, b = int(1.5 * sr), int(2.5 * sr)
+        y[a:b] += 0.5 * np.random.default_rng(0).standard_normal(b - a).astype(np.float32)
+        sf.write(str(sdir / "clean" / "vocals.wav"), y, sr)
+        healthy = [dict(u, floor_frac=0.0, max_floor_run=0, unsure_lyrics=False)
+                   for u in self.UTTS]
+        (sdir / "align" / "utterances.json").write_text(json.dumps(healthy),
+                                                        encoding="utf-8")
+        update_analysis(sdir, "align", {"mode": "phrases", "align_score": 0.95})
+        return sid, measure_quality
+
+    def test_low_hnr_phrase_gated_on_separated_audio_only(self, tmp_path, make_wav):
+        gate = {"enabled": True, "min_hnr_db": 13.0}
+        for sq, expect in (("separated", {"low_hnr": 1}), ("studio", {})):
+            root = tmp_path / sq
+            sid, measure_quality = self._noisy_middle_song(root, make_wav, sq)
+            assert measure_quality(root).measured == [f"{sid}/quality.json"]
+            s = build(root, recipe=recipe(name="q", alignment_variant="phrase",
+                                          phrase_gate=gate))
+            assert s.songs_used == [sid] and s.gated_phrases == expect
+        assert s.clips == 1  # studio: nothing gated, one clip over all three phrases
+
+    def test_quality_gate_needs_a_current_quality_file(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        sid, measure_quality = self._noisy_middle_song(root, make_wav, "separated")
+        r = recipe(name="q", alignment_variant="phrase",
+                   phrase_gate={"enabled": True, "min_hnr_db": 13.0})
+        assert "signalml quality" in build(root, recipe=r).skipped[sid]  # never measured
+        measure_quality(root)
+        assert measure_quality(root).measured == []  # idempotent
+        # re-aligned since: the windows moved, so the old numbers no longer apply
+        utts_path = song_dir(root, sid) / "align" / "utterances.json"
+        utts = json.loads(utts_path.read_text(encoding="utf-8"))
+        utts[1]["end"] = utts[2]["start"] = 2.4
+        utts_path.write_text(json.dumps(utts), encoding="utf-8")
+        assert "quality.json" in build(root, recipe=r, force=True).skipped[sid]
+        assert measure_quality(root).measured == [f"{sid}/quality.json"]
+        assert build(root, recipe=r, force=True).songs_used == [sid]
+
     def test_variant_score_gates_like_align_score(self, tmp_path, make_wav):
         root = tmp_path / "dr"
         sid = _ready_song(root, make_wav)
