@@ -406,6 +406,36 @@ def _cmd_manifest_import_acapella(args: argparse.Namespace) -> int:
     return 1 if failed and not new_records else 0
 
 
+def _cmd_manifest_import_nus48e(args: argparse.Namespace) -> int:
+    import soundfile as sf
+
+    from .ingest.nus48e import import_nus48e
+    from .manifest import resolve_data_root
+
+    parts = [p.strip() for p in args.parts.split(",") if p.strip()]
+    manifest, new_records, skipped, takes = import_nus48e(
+        resolve_data_root(args.data_root), root=args.path, parts=parts, limit=args.limit,
+        dry_run=args.dry_run)
+    by_part = {p: sum(sf.info(str(t.wav)).duration for t in takes if t.part == p) / 3600
+               for p in parts}
+    print(f"{len(takes)} take(s) from {len({t.singer for t in takes})} singer(s); hours "
+          + ", ".join(f"{p} {h:.2f}" for p, h in by_part.items()))
+    for label, reason in sorted(skipped.items()):
+        if "checksum" not in reason:
+            print(f"  SKIPPED {label}: {reason}", file=sys.stderr)
+    if args.dry_run:
+        print(f"import-nus48e (dry run): {len(takes)} take(s) would be imported")
+        return 0
+    manifest.save()
+    failed = sum(1 for r in skipped.values() if r.startswith("failed"))
+    print(f"import-nus48e: {len(new_records)} imported, {failed} failed, "
+          f"{len(manifest)} records total")
+    if new_records:
+        print("next: set gender (review), signalml clean --profile prod (aligned already: "
+              "manual phone labels; read takes are domain=spoken)")
+    return 1 if failed and not new_records else 0
+
+
 def _cmd_manifest_import_multitrack(args: argparse.Namespace) -> int:
     from pathlib import Path
 
@@ -1413,6 +1443,21 @@ def main(argv: list[str] | None = None) -> int:
         ac_p.add_argument("--dry-run", action="store_true",
                           help="report the takes found; write nothing")
         ac_p.set_defaults(func=_cmd_manifest_import_acapella, corpus_name=name)
+    nus_p = manifest_sub.add_parser(
+        "import-nus48e",
+        help="onboard NUS-48E: 12 singers' sung AND read lyrics with manual phone labels "
+             "(read takes as domain=spoken, linked to their sung partner)")
+    nus_p.add_argument("--data-root", default=None,
+                       help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    nus_p.add_argument("--path", required=True,
+                       help="extracted nus-smc-corpus_48/ (holds <SINGER>/{sing,read}/)")
+    nus_p.add_argument("--parts", default="sing,read",
+                       help="comma list: sing, read (default both)")
+    nus_p.add_argument("--limit", type=int, default=None,
+                       help="import at most N takes (smoke tests)")
+    nus_p.add_argument("--dry-run", action="store_true",
+                       help="report the takes found; write nothing")
+    nus_p.set_defaults(func=_cmd_manifest_import_nus48e)
     mt_p = manifest_sub.add_parser(
         "import-multitrack",
         help="import the vocal tracks of raw studio multitrack sessions (one folder "

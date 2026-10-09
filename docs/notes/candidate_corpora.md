@@ -11,6 +11,7 @@ and wired into ingest (imports not yet run on the live manifest):
 | GTSinger other 8 languages | authors' Drive zips (HF README) | zh fr de it ja ko ru es | 17 (8 M / 9 F) | 48 kHz | phone TextGrid, score | `import-gtsinger --language <L>` |
 | RAVDESS song | Zenodo 1188976 | en | 12 M / 11 F | 1.3 h files, 48 kHz | 2 fixed statements, emotion | `import-ravdess` |
 | vocadito | Zenodo 5578807 | 7 (17 en tracks) | 29 | 0.23 h, 44.1 kHz, devices | lyrics, 2x notes, F0 | `import-vocadito` (eval / notes) |
+| NUS-48E | Zenodo 19595152 (re-upload; contents match the paper: 12 singers, 20 songs, 25,474 sung phones) | en | 6 M / 6 F (paper; folders unlabelled) | 1.9 h sung + 0.9 h read, 44.1 kHz | manual phones on sung AND read takes | `import-nus48e` (read = `domain=spoken`, paired) |
 | M4Singer | authors' Drive (GitHub README) | zh | 10 M / 10 F | 29.7 h, 44.1-96 kHz | pinyin phones, notes, MIDI | `import-m4singer` |
 
 Phone handling: English ARPAbet -> MFA IPA as before; GTSinger's French, German,
@@ -25,7 +26,6 @@ Not downloaded, and why:
 
 | Dataset | Reason |
 |---|---|
-| NUS-48E (12 singers, 6 M / 6 F, en, phone labels) | only copy found is an anonymous 2026 Zenodo re-upload with no creators; the lab's own distribution could not be confirmed |
 | NHSS (10 singers, 5 M / 5 F, en, ~7 h) | no public download; access via the NUS HLT authors |
 | PopBuTFy (English half ~40 h, 22 singers) | registration by email to the authors |
 | SingStyle111 (8 singers, 12.8 h, en/zh/it, 44.1 kHz) | no download link on the project page; contact the authors |
