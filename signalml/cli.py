@@ -317,12 +317,17 @@ def _cmd_manifest_import_gtsinger(args: argparse.Namespace) -> int:
     genders = [g.strip() for g in args.genders.split(",") if g.strip()]
     manifest, new_records, skipped, groups = import_gtsinger(
         resolve_data_root(args.data_root), root=args.path, genders=genders,
-        limit=args.limit, dry_run=args.dry_run)
+        language=args.language, limit=args.limit, dry_run=args.dry_run)
     singers = sorted({g.singer for g in groups})
     print(f"{len(groups)} take(s) from {len(singers)} singer(s) {singers}")
+    native = {k: r for k, r in skipped.items() if r.startswith("native:")}
     for label, reason in sorted(skipped.items()):
-        if "checksum" not in reason and "spoken reading" not in reason:
+        if "checksum" not in reason and "spoken reading" not in reason \
+                and label not in native:
             print(f"  SKIPPED {label}: {reason}", file=sys.stderr)
+    if native:
+        print(f"  {len(native)} take(s) imported UNALIGNED with align/phones.native.json "
+              f"(no IPA mapping): e.g. {next(iter(native.values()))}")
     if args.dry_run:
         print(f"import-gtsinger (dry run): {len(groups)} take(s) would be imported")
         return 0
@@ -330,9 +335,12 @@ def _cmd_manifest_import_gtsinger(args: argparse.Namespace) -> int:
     failed = sum(1 for r in skipped.values() if r.startswith("failed"))
     print(f"import-gtsinger: {len(new_records)} imported, {failed} failed, "
           f"{len(manifest)} records total")
-    if new_records:
+    if any(r.status.aligned for r in new_records):
         print("next: signalml clean --profile prod (aligned already: manual TextGrids). "
               "Licence CC BY-NC-SA 4.0 - non-commercial.")
+    if native:
+        print("unaligned takes: clean --profile prod, then either a reviewed phone mapping "
+              "of phones.native.json or the normal Whisper -> align path for that language")
     return 1 if failed and not new_records else 0
 
 
@@ -353,6 +361,79 @@ def _cmd_manifest_import_csd(args: argparse.Namespace) -> int:
         print("next: signalml clean --profile prod, Whisper (asr.json), lyrics --resolve, "
               "align --phrases. Licence CC BY-NC-SA 4.0 - non-commercial.")
     return 0
+
+
+def _cmd_manifest_import_acapella(args: argparse.Namespace) -> int:
+    """import-ravdess / import-vocadito: lyrics-sidecar a cappella corpora."""
+    import soundfile as sf
+
+    from .manifest import resolve_data_root
+
+    def split(value: str) -> list[str]:
+        return [v.strip() for v in value.split(",") if v.strip()]
+
+    name = args.corpus_name
+    if name == "ravdess":
+        from .ingest.ravdess import import_ravdess as run
+        kwargs = {"genders": split(args.genders)}
+    elif name == "m4singer":
+        from .ingest.m4singer import import_m4singer as run
+        kwargs = {"genders": split(args.genders)}
+    else:
+        from .ingest.vocadito import import_vocadito as run
+        kwargs = {"languages": split(args.languages)}
+    manifest, new_records, skipped, takes = run(
+        resolve_data_root(args.data_root), root=args.path, limit=args.limit,
+        dry_run=args.dry_run, **kwargs)
+    singers = sorted({t.singer for t in takes})
+    genders = {str(g): sum(1 for t in takes if t.gender == g) for g in ("F", "M", None)}
+    hours = sum(sf.info(str(s)).duration for t in takes for s in t.segments) / 3600
+    print(f"{len(takes)} take(s), {hours:.2f} h, {len(singers)} singer(s), "
+          f"takes by gender {genders}")
+    for label, reason in sorted(skipped.items()):
+        if "checksum" not in reason:
+            print(f"  SKIPPED {label}: {reason}", file=sys.stderr)
+    if args.dry_run:
+        print(f"import-{name} (dry run): {len(takes)} take(s) would be imported")
+        return 0
+    manifest.save()
+    failed = sum(1 for r in skipped.values() if r.startswith("failed"))
+    print(f"import-{name}: {len(new_records)} imported, {failed} failed, "
+          f"{len(manifest)} records total")
+    if new_records:
+        print("next: signalml clean --profile prod, Whisper (asr.json), lyrics --resolve, "
+              "align --phrases")
+    return 1 if failed and not new_records else 0
+
+
+def _cmd_manifest_import_nus48e(args: argparse.Namespace) -> int:
+    import soundfile as sf
+
+    from .ingest.nus48e import import_nus48e
+    from .manifest import resolve_data_root
+
+    parts = [p.strip() for p in args.parts.split(",") if p.strip()]
+    manifest, new_records, skipped, takes = import_nus48e(
+        resolve_data_root(args.data_root), root=args.path, parts=parts, limit=args.limit,
+        dry_run=args.dry_run)
+    by_part = {p: sum(sf.info(str(t.wav)).duration for t in takes if t.part == p) / 3600
+               for p in parts}
+    print(f"{len(takes)} take(s) from {len({t.singer for t in takes})} singer(s); hours "
+          + ", ".join(f"{p} {h:.2f}" for p, h in by_part.items()))
+    for label, reason in sorted(skipped.items()):
+        if "checksum" not in reason:
+            print(f"  SKIPPED {label}: {reason}", file=sys.stderr)
+    if args.dry_run:
+        print(f"import-nus48e (dry run): {len(takes)} take(s) would be imported")
+        return 0
+    manifest.save()
+    failed = sum(1 for r in skipped.values() if r.startswith("failed"))
+    print(f"import-nus48e: {len(new_records)} imported, {failed} failed, "
+          f"{len(manifest)} records total")
+    if new_records:
+        print("next: set gender (review), signalml clean --profile prod (aligned already: "
+              "manual phone labels; read takes are domain=spoken)")
+    return 1 if failed and not new_records else 0
 
 
 def _cmd_manifest_import_multitrack(args: argparse.Namespace) -> int:
@@ -1346,6 +1427,9 @@ def main(argv: list[str] | None = None) -> int:
     gts_p.add_argument("--genders", default="F",
                        help="comma list F,M - from the voice part in the singer folder "
                             "(Alto/Soprano = F, Tenor/Bass = M; default: F)")
+    gts_p.add_argument("--language", default="English",
+                       help="GTSinger language folder (English default; French, German, "
+                            "... keep MFA IPA phones; Chinese pinyin stays native)")
     gts_p.add_argument("--limit", type=int, default=None,
                        help="import at most N takes (smoke tests)")
     gts_p.add_argument("--dry-run", action="store_true",
@@ -1364,6 +1448,47 @@ def main(argv: list[str] | None = None) -> int:
     csd_p.add_argument("--limit", type=int, default=None,
                        help="import at most N recordings (smoke tests)")
     csd_p.set_defaults(func=_cmd_manifest_import_csd)
+    for name, help_text, path_help in (
+        ("ravdess", "onboard RAVDESS sung statements (23 actors, M/F), one take per "
+                    "actor x emotion x intensity, lyrics from the file codes",
+         "extracted Audio_Song_Actors_01-24.zip (holds Actor_NN/)"),
+        ("vocadito", "onboard vocadito solo-singing excerpts with lyrics, note and F0 "
+                     "annotations (device recordings: source_quality unset)",
+         "extracted vocadito.zip (holds vocadito_metadata.csv, Audio/, Annotations/)"),
+        ("m4singer", "onboard M4Singer (Mandarin, 20 singers M/F); its pinyin phone + "
+                     "note alignment is kept as align/phones.native.json, not converted",
+         "extracted m4singer.zip (the folder holding meta.json and Singer#Song/)"),
+    ):
+        ac_p = manifest_sub.add_parser(f"import-{name}", help=help_text)
+        ac_p.add_argument("--data-root", default=None,
+                          help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+        ac_p.add_argument("--path", required=True, help=path_help)
+        if name in ("ravdess", "m4singer"):
+            ac_p.add_argument("--genders", default="F,M",
+                              help="comma list F,M (default both)")
+        else:
+            ac_p.add_argument("--languages", default="en",
+                              help="comma list of ISO codes to import (default en)")
+        ac_p.add_argument("--limit", type=int, default=None,
+                          help="import at most N takes (smoke tests)")
+        ac_p.add_argument("--dry-run", action="store_true",
+                          help="report the takes found; write nothing")
+        ac_p.set_defaults(func=_cmd_manifest_import_acapella, corpus_name=name)
+    nus_p = manifest_sub.add_parser(
+        "import-nus48e",
+        help="onboard NUS-48E: 12 singers' sung AND read lyrics with manual phone labels "
+             "(read takes as domain=spoken, linked to their sung partner)")
+    nus_p.add_argument("--data-root", default=None,
+                       help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    nus_p.add_argument("--path", required=True,
+                       help="extracted nus-smc-corpus_48/ (holds <SINGER>/{sing,read}/)")
+    nus_p.add_argument("--parts", default="sing,read",
+                       help="comma list: sing, read (default both)")
+    nus_p.add_argument("--limit", type=int, default=None,
+                       help="import at most N takes (smoke tests)")
+    nus_p.add_argument("--dry-run", action="store_true",
+                       help="report the takes found; write nothing")
+    nus_p.set_defaults(func=_cmd_manifest_import_nus48e)
     mt_p = manifest_sub.add_parser(
         "import-multitrack",
         help="import the vocal tracks of raw studio multitrack sessions (one folder "

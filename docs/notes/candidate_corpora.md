@@ -1,5 +1,46 @@
 # Candidate corpora — survey (2026-09-18)
 
+**Update 2026-10-09 — public singing datasets pass** (branch `public-singing-datasets`).
+Goal: more studio singing for the acoustic model, male voices and English first, native
+rate >= 44.1 kHz, provided alignments / notes a bonus. Downloaded from official hosts
+and wired into ingest (imports not yet run on the live manifest):
+
+| Dataset | Host | Lang | Singers | Audio | Labels | Adapter |
+|---|---|---|---|---|---|---|
+| GTSinger EN-Tenor-1 | HF `GTSinger/GTSinger` | en | 1 M | 4.8 h sung, 48 kHz | phone TextGrid, score | `import-gtsinger --genders M` (no code change) |
+| GTSinger other 8 languages | authors' Drive zips (HF README) | zh fr de it ja ko ru es | 17 (8 M / 9 F) | 48 kHz | phone TextGrid, score | `import-gtsinger --language <L>` |
+| RAVDESS song | Zenodo 1188976 | en | 12 M / 11 F | 1.3 h files, 48 kHz | 2 fixed statements, emotion | `import-ravdess` |
+| vocadito | Zenodo 5578807 | 7 (17 en tracks) | 29 | 0.23 h, 44.1 kHz, devices | lyrics, 2x notes, F0 | `import-vocadito` (eval / notes) |
+| NUS-48E | Zenodo 19595152 (re-upload; contents match the paper: 12 singers, 20 songs, 25,474 sung phones) | en | 6 M / 6 F (paper; folders unlabelled) | 1.9 h sung + 0.9 h read, 44.1 kHz | manual phones on sung AND read takes | `import-nus48e` (read = `domain=spoken`, paired) |
+| M4Singer | authors' Drive (GitHub README) | zh | 10 M / 10 F | 29.7 h, 44.1-96 kHz | pinyin phones, notes, MIDI | `import-m4singer` |
+
+Phone handling: English ARPAbet -> MFA IPA as before; GTSinger's French, German,
+Italian, ... already use MFA IPA labels and are validated, then written as
+`phones.json` (`mfa_ipa/<code>_v1`); Chinese pinyin (GTSinger, M4Singer) has no
+reviewed IPA mapping, so those takes keep the corpus alignment as
+`align/phones.native.json` and stay `aligned=false`. Any label that fails conversion
+sends its take the same way, with an `exceptions` list - nothing is guessed. Whether
+the non-English sets train (DiffSinger language ids) is a recipe decision.
+
+Not downloaded, and why:
+
+| Dataset | Reason |
+|---|---|
+| NHSS (10 singers, 5 M / 5 F, en, ~7 h) | no public download; access via the NUS HLT authors |
+| PopBuTFy (English half ~40 h, 22 singers) | registration by email to the authors |
+| SingStyle111 (8 singers, 12.8 h, en/zh/it, 44.1 kHz) | no download link on the project page; contact the authors |
+| MoisesDB (240 multitracks) | download behind the Moises research-site form |
+| Hi-Singers (HF) | HF gated repo (terms checkbox form) |
+| Opencpop, PopCS | application form |
+| RawStems (MSR challenge, Mixing Secrets stems, ~214 GB) | over the 150 GB single-dataset cap |
+| Cambridge-MT library site | bot check on the site; RawStems is the same library |
+| MUSDB18-HQ | full mixes + summed vocal stem; overlaps MedleyDB; dropped as low priority |
+| OpenSinger, JVS-MuSiC | 24 kHz (below prod) |
+| MIR-1K, DSing | 16 kHz |
+| ACE-KiSing / ACE-Opencpop | synthetic (ACE Studio renders) |
+| SingNet | data not released |
+| ESMUC, Dagstuhl ChoirSet, Choral Singing Dataset | choral, non-English, close-mic bleed; still the voice-bank / ECAPA candidates below |
+
 **Update 2026-09-26:** GTSinger's English female singers (EN-Alto-1/2; singing takes
 only) and CSD's English half are onboarded - `signalml manifest import-gtsinger` (its
 manual TextGrid alignments are converted to `phones.json`, no MFA) and `signalml
