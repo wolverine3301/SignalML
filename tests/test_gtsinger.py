@@ -56,6 +56,14 @@ def test_find_groups_skips_speech_and_other_genders(corpus):
     assert "EN-Tenor-1" in skipped and any("Paired_Speech" in k for k in skipped)
 
 
+def test_male_singers_import_with_genders_m(corpus, tmp_path):
+    root = tmp_path / "dr"
+    manifest, new, _, groups = import_gtsinger(root, root=corpus, genders=("M",))
+    assert [g.singer for g in groups] == ["EN-Tenor-1"]
+    rec = new[0]
+    assert (rec.meta.singer, rec.meta.gender) == ("gtsinger-en-tenor-1", "M")
+
+
 def test_import_joins_phrases_and_converts_the_manual_alignment(corpus, tmp_path):
     root = tmp_path / "dr"
     manifest, new, skipped, _ = import_gtsinger(root, root=corpus)
