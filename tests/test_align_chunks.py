@@ -55,6 +55,18 @@ def test_no_cut_through_legato_singing():
     assert len(utts) == 1 and utts[0].lines == (0, 1, 2)
 
 
+def test_no_cut_at_a_consonant_closure():
+    # lines 0 and 1 sung legato except a 60 ms dip (a /t/ closure inside a word):
+    # deep enough to pass the dip test, too short to be a rest
+    lvl = _level([(2.0, 6.0), (6.06, 13.0), (18.0, 21.0)])
+    utts = plan_utterances(TEXT, SEGS, lvl, DUR)
+    assert [u.lines for u in utts] == [(0, 1), (2,)]
+    # without a minimum rest the planner cuts at the closure, mid-word
+    old = plan_utterances(TEXT, SEGS, lvl, DUR, min_rest_sec=0.0)
+    assert [u.lines for u in old] == [(0,), (1,), (2,)]
+    assert 6.0 <= old[0].end <= 6.1
+
+
 def test_an_unanchored_line_rides_inside_its_neighbours_utterance():
     segs = [_seg(2.0, LINES[0]), _seg(18.0, LINES[2])]  # Whisper missed line 1
     utts = plan_utterances(TEXT, segs, _level(SUNG), DUR)

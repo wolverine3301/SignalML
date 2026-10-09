@@ -43,6 +43,14 @@ EDGE_MARGIN_SEC = 1.0
 MIN_EXTRA_WORDS = 3
 MAX_GAP_SEC = 4.0
 HOLD_SEC = 2.0  # how far past a line's last heard word its final note may still ring
+# A dip must stay quiet this long to be cut at. The closure of a /t/, /k/ or /p/ inside
+# a word is a deep but brief dip; cutting there squeezes the word to MFA's frame floor
+# and glues the rest of the held note onto the next line's first phone. Replayed over
+# the corpus (2026-10-08): 0.10 s removes ~60% of the cuts that landed inside singing
+# and fixed most of the cut-off words a listener flagged (0.12 s: no more), moving ~11% of
+# the cuts at real rests; the longest utterances grow from ~18 to ~25 s at p95. Kept
+# small on purpose: fast, blended lyrics have no clean cut points to find.
+MIN_REST_SEC = 0.10
 
 
 @dataclass(frozen=True)
@@ -134,8 +142,12 @@ def line_spans(lines: list[str], segments: list[dict]) -> list[tuple[float, floa
 
 
 def find_dip(level_db: np.ndarray, lo: float, hi: float,
-             hop_sec: float = HOP_SEC) -> float | None:
-    """Time of the quietest point in [lo, hi] if it is a real dip, else None."""
+             hop_sec: float = HOP_SEC, min_rest_sec: float = MIN_REST_SEC) -> float | None:
+    """Time of the quietest point in [lo, hi] if it is a real dip, else None.
+
+    Only quiet stretches (``MIN_DIP_DB`` under the loud part of the singing around
+    them) lasting ``min_rest_sec`` are eligible, so a consonant closure inside a word
+    is passed over in favour of a breath or a rest - or no cut at all."""
     a, b = max(0, int(lo / hop_sec)), min(len(level_db), int(hi / hop_sec))
     k = max(1, int(SMOOTH_SEC / hop_sec))
     if b - a < k:
@@ -143,14 +155,29 @@ def find_dip(level_db: np.ndarray, lo: float, hi: float,
     smooth = np.convolve(level_db[a:b], np.ones(k) / k, mode="valid")
     c = int(CONTEXT_SEC / hop_sec)
     loud = np.percentile(level_db[max(0, a - c):min(len(level_db), b + c)], 75)
-    i = int(np.argmin(smooth))
-    if loud - smooth[i] < MIN_DIP_DB:
+    quiet = loud - smooth >= MIN_DIP_DB
+    need = max(1, int(round(min_rest_sec / hop_sec)))
+    best = None
+    i = 0
+    while i < len(quiet):
+        if not quiet[i]:
+            i += 1
+            continue
+        j = i
+        while j < len(quiet) and quiet[j]:
+            j += 1
+        if j - i >= need:
+            m = i + int(np.argmin(smooth[i:j]))
+            if best is None or smooth[m] < smooth[best]:
+                best = m
+        i = j
+    if best is None:
         return None
-    return (a + i + k / 2) * hop_sec
+    return (a + best + k / 2) * hop_sec
 
 
 def _excised_gap(ev: LineEvidence, a: int, b: int, level_db: np.ndarray,
-                 hop_sec: float) -> tuple[float, float] | None:
+                 hop_sec: float, min_rest_sec: float) -> tuple[float, float] | None:
     """(end of line a's utterance, start of line b's) when the audio between should
     belong to neither, else None. Both edges must be real dips near their line - a
     held last note can run past Whisper's word end, so the search reaches
@@ -162,8 +189,10 @@ def _excised_gap(ev: LineEvidence, a: int, b: int, level_db: np.ndarray,
     if b_start - a_end < MAX_GAP_SEC and n_extra < MIN_EXTRA_WORDS:
         return None
     mid = (a_end + b_start) / 2
-    t1 = find_dip(level_db, a_end - EDGE_TOL_SEC, min(a_end + HOLD_SEC, mid), hop_sec)
-    t2 = find_dip(level_db, max(b_start - HOLD_SEC, mid), b_start + EDGE_TOL_SEC, hop_sec)
+    t1 = find_dip(level_db, a_end - EDGE_TOL_SEC, min(a_end + HOLD_SEC, mid), hop_sec,
+                  min_rest_sec)
+    t2 = find_dip(level_db, max(b_start - HOLD_SEC, mid), b_start + EDGE_TOL_SEC, hop_sec,
+                  min_rest_sec)
     if t1 is None or t2 is None or t2 <= t1:
         return None
     return t1, t2
@@ -176,6 +205,7 @@ def plan_utterances(
     duration: float,
     hop_sec: float = HOP_SEC,
     excise_gaps: bool = True,
+    min_rest_sec: float = MIN_REST_SEC,
 ) -> list[Utterance]:
     """Cut the song into utterances at dips between consecutive anchored lyric lines.
 
@@ -199,12 +229,12 @@ def plan_utterances(
         if b != a + 1:  # unanchored lines between: keep them inside one utterance
             continue
         if excise_gaps:
-            gap = _excised_gap(ev, a, b, level_db, hop_sec)
+            gap = _excised_gap(ev, a, b, level_db, hop_sec, min_rest_sec)
             if gap is not None and (not cuts or gap[0] > cuts[-1][2]):
                 cuts.append((b, *gap))
                 continue
         lo, hi = spans[a][1] - EDGE_TOL_SEC, spans[b][0] + EDGE_TOL_SEC
-        t = find_dip(level_db, lo, hi, hop_sec) if hi > lo else None
+        t = find_dip(level_db, lo, hi, hop_sec, min_rest_sec) if hi > lo else None
         if t is not None and (not cuts or t > cuts[-1][2]):
             cuts.append((b, t, t))
 
