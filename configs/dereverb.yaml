@@ -1,0 +1,22 @@
+# S4b de-reverb (signalml/stages/dereverb.py). Separated vocals only, judged per phrase.
+model: dereverb_bs_roformer_anvuew
+# anvuew BS-RoFormer de-reverb, huggingface.co/anvuew/dereverb_bs_roformer
+#   revision bd5c6b55a429b4b74ce85fe5dcb690cfe36d91ec
+#   sha256   b4dfa4c4aa251c0afc303e5d512d904a1c2255e51d8d0dbfbddb18d740563d42 (204 MB)
+#   licence  gpl-3.0 (model card metadata)
+# Relative paths resolve against DATA_ROOT.
+checkpoint: models/dereverb_bs_roformer_anvuew/dereverb_bs_roformer_anvuew_sdr_22.5050.ckpt
+model_yaml: models/dereverb_bs_roformer_anvuew/config.yaml
+device: auto        # auto | cuda | cpu
+batch_size: 2       # chunks per forward pass (~1.5 GB VRAM at 2)
+num_overlap: null   # null = the model config's inference.num_overlap
+source: stems       # the stereo separated stem: reverb is wide, the voice centred, and the
+                    # stereo model needs that; falls back to clean/vocals.wav (mono)
+scope: [separated]  # source_quality values that get de-reverbed; studio never does
+
+gate:               # a phrase keeps the de-reverbed audio only if ALL hold
+  max_f0_cents: 30.0        # median pitch change on frames voiced in both
+  min_voiced_overlap: 0.85  # share of the original's voiced frames still voiced
+  max_level_drop_db: 6.0    # the singing (p90 level of the sung span) may not lose more
+  min_tail_gain_db: 3.0     # improved: tail/gap after the phrase this much quieter...
+  min_hnr_gain_db: 1.0      # ...or HNR this much higher

@@ -65,6 +65,7 @@ Newest last. One line each: what it is, whether it's critical path, and the verd
 | Branch | Tier | What | Needs |
 |---|---|---|---|
 | `emotion-corpora-survey` | C (D10) | EARS + CREMA-D adapters, emotion contract, labeller calibration, 4,847 lines | Low urgency, and deliberately **left out of `main`** on rig day 2026-09-20. Rebase onto `main` when it is wanted |
+| `dereverb-preprocess` | data quality (asked for in an interactive session, 2026-10-09) | **NEW OPTIONAL STAGE S4b + NEW OPTIONAL RECIPE FIELD `dereverb` (default off; manifest schema unchanged).** `signalml dereverb`: BS-RoFormer de-reverb of separated vocals (model code vendored in `third_party/msst_roformer`, `restore` extra), per-phrase keep/revert verdicts, dataset composes original + de-reverbed per phrase, and the HNR gate reads the audio actually used. `scripts/dereverb_eval.py` measures whether it's worth it | Stacked on `phrase-quality-gate` (it builds on that branch's quality gate). Verdict: run it before the v5 build? The eval numbers are in the private notes |
 
 **Merged to `main` 2026-09-20** (rig day — Logan's call to land everything but the
 emotion branch): `rig-prep` (P7.3 `signalml train` wrapper, preflight, run records,

@@ -740,3 +740,80 @@ def test_machine_lyrics_skip_agreement_and_ids_can_be_excluded(tmp_path, make_wa
     assert build(root, recipe=r).songs_used == [sid]
     r = recipe(name="asr2", filters={"min_align_score": 0.8, "exclude_ids": [sid]})
     assert build(root, recipe=r).skipped[sid] == "excluded by recipe id list"
+
+
+class TestDereverbUse:
+    """`dereverb: {enabled: true}` composes kept phrases from clean/vocals.dereverb.wav."""
+
+    UTTS = TestPhraseGate.UTTS
+
+    def _song(self, root, make_wav, keep_middle_hnr):
+        import numpy as np
+
+        from signalml.stages.dereverb import DEREVERB_VERSION, OUT_NAME
+        from signalml.stages.phrase_quality import QUALITY_VERSION
+
+        sid = _ready_song(root, make_wav, phones=TestPhraseGate.TIGHT)
+        m = Manifest.for_data_root(root)
+        rec = m.get(sid)
+        rec.meta.source_quality = "separated"
+        m.upsert(rec)
+        m.save()
+        sdir = song_dir(root, sid)
+        y, sr = sf.read(str(sdir / "clean" / "vocals.wav"), dtype="float32")
+        sf.write(str(sdir / "clean" / OUT_NAME), np.full_like(y, 0.25), sr)
+        healthy = [dict(u, floor_frac=0.0, max_floor_run=0, unsure_lyrics=False)
+                   for u in self.UTTS]
+        adir = sdir / "align"
+        (adir / "utterances.json").write_text(json.dumps(healthy), encoding="utf-8")
+        update_analysis(sdir, "align", {"mode": "phrases", "align_score": 0.95})
+        # the middle phrase measured as wet (low HNR) and kept after de-reverb
+        (adir / "quality.json").write_text(json.dumps({
+            "version": QUALITY_VERSION, "phrases": [
+                dict(u, hnr_db=h) for u, h in zip(healthy, (20.0, 9.0, 20.0))]}),
+            encoding="utf-8")
+        (adir / "dereverb.json").write_text(json.dumps({
+            "version": DEREVERB_VERSION, "model": "stub", "phrases": [
+                dict(u, keep=k, after={"hnr_db": h})
+                for u, k, h in zip(healthy, (False, True, False),
+                                   (20.0, keep_middle_hnr, 20.0))]}), encoding="utf-8")
+        return sid, sr
+
+    def test_kept_phrase_audio_comes_from_the_dereverbed_file(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        sid, sr = self._song(root, make_wav, keep_middle_hnr=16.0)
+        r = recipe(name="dv", alignment_variant="phrase", dereverb={"enabled": True})
+        s = build(root, recipe=r)
+        assert (s.dereverb_songs, s.dereverb_phrases, s.dereverb_missing) == (1, 1, 0)
+        (wav,) = list(s.out_dir.glob("*/wavs/*.wav"))
+        y, _ = sf.read(str(wav), dtype="float32")
+        start = 0.5 - SEG.pad_sec  # one clip over all three phrases, padded
+        mid = y[int((2.0 - start) * sr)]
+        first = y[int((1.0 - start) * sr)]
+        assert abs(mid - 0.25) < 1e-3       # composed from the de-reverbed file
+        assert abs(first - 0.25) > 1e-3     # an unkept phrase keeps the original
+        card = (s.out_dir / "dataset_card.md").read_text(encoding="utf-8")
+        assert "dereverb: 1 phrase(s) in 1 song(s)" in card
+        off = build(root, recipe=recipe(name="off", alignment_variant="phrase"))
+        assert off.dereverb_phrases == 0
+
+    def test_hnr_gate_reads_the_audio_actually_used(self, tmp_path, make_wav):
+        gate = {"enabled": True, "min_hnr_db": 13.0}
+        for after_hnr, gated in ((16.0, {}), (11.0, {"low_hnr": 1})):
+            root = tmp_path / f"h{after_hnr}"
+            self._song(root, make_wav, keep_middle_hnr=after_hnr)
+            s = build(root, recipe=recipe(name="g", alignment_variant="phrase",
+                                          phrase_gate=gate, dereverb={"enabled": True}))
+            assert s.gated_phrases == gated
+        # without de-reverb the wet middle phrase is gated on its original HNR
+        s = build(root, recipe=recipe(name="g2", alignment_variant="phrase",
+                                      phrase_gate=gate))
+        assert s.gated_phrases == {"low_hnr": 1}
+
+    def test_missing_verdicts_fall_back_to_the_original(self, tmp_path, make_wav):
+        root = tmp_path / "dr"
+        sid, _ = self._song(root, make_wav, keep_middle_hnr=16.0)
+        (song_dir(root, sid) / "align" / "dereverb.json").unlink()
+        s = build(root, recipe=recipe(name="dv", alignment_variant="phrase",
+                                      dereverb={"enabled": True}))
+        assert s.songs_used == [sid] and s.dereverb_missing == 1 and s.dereverb_phrases == 0

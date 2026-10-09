@@ -495,6 +495,24 @@ def _cmd_quality(args: argparse.Namespace) -> int:
     return 0 if not summary.failed else 1
 
 
+def _cmd_dereverb(args: argparse.Namespace) -> int:
+    from .manifest import resolve_data_root
+    from .stages.dereverb import dereverb_songs, load_dereverb_config
+
+    config = load_dereverb_config(args.config)
+    if args.device:
+        config.device = args.device
+    summary = dereverb_songs(resolve_data_root(args.data_root), config=config,
+                             force=args.force, limit=args.limit, ids=args.ids or None)
+    share = f"{summary.kept}/{summary.phrases}" if summary.phrases else "0/0"
+    print(f"dereverb: {len(summary.processed)} de-reverbed, {len(summary.judged)} judged "
+          f"(phrases kept {share}, {dict(summary.reasons)}), {len(summary.skipped)} "
+          f"skipped, {len(summary.failed)} failed")
+    for label, err in summary.failed.items():
+        print(f"  FAILED {label}: {err}", file=sys.stderr)
+    return 0 if not summary.failed else 1
+
+
 def _cmd_eval_align(args: argparse.Namespace) -> int:
     from .evaluation.runner import collect_align_scores, load_song_map, run_jamendolyrics
     from .manifest import resolve_data_root
@@ -1486,6 +1504,21 @@ def main(argv: list[str] | None = None) -> int:
     quality_p.add_argument("--limit", type=int, default=None, help="max files this run")
     quality_p.add_argument("--ids", nargs="*", default=None, help="only these song ids")
     quality_p.set_defaults(func=_cmd_quality)
+
+    # dereverb (S4b: de-reverbed copy of separated vocals + per-phrase verdicts)
+    dereverb_p = subparsers.add_parser(
+        "dereverb", help="[S4b] de-reverb separated vocals -> clean/vocals.dereverb.wav "
+                         "+ per-phrase keep/revert verdicts (align/dereverb*.json)")
+    dereverb_p.add_argument("--data-root", default=None,
+                            help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
+    dereverb_p.add_argument("--config", default=None, help="defaults to configs/dereverb.yaml")
+    dereverb_p.add_argument("--device", default=None, help="override: auto | cuda | cpu")
+    dereverb_p.add_argument("--force", action="store_true",
+                            help="redo audio and verdicts even when current")
+    dereverb_p.add_argument("--limit", type=int, default=None,
+                            help="max songs to (re)make audio for this run")
+    dereverb_p.add_argument("--ids", nargs="*", default=None, help="only these song ids")
+    dereverb_p.set_defaults(func=_cmd_dereverb)
 
     # eval (P5.4 aligner comparison — docs/notes/aligner_eval.md)
     eval_p = subparsers.add_parser("eval", help="[P5] measure alignment against ground truth")

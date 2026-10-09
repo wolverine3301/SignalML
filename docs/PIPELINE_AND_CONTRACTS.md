@@ -182,6 +182,14 @@ for audit. All other stages consume/update it.
 | Invariants | downstream stages read **only** `phones.json` — swapping aligners (or adding Gaelic) = one new converter/config, nothing downstream changes; alignment confidence recorded to `quality.align_score` so bad alignments can be excluded from training; `phone_set` is versioned to leave room for the future project-owned universal IPA subset (OPEN_QUESTIONS *Future direction*) |
 | Phrase quality | `signalml quality` writes `align/quality<suffix>.json` beside each `utterances<suffix>.json`: one entry per phrase (same order, window copied in so a re-alignment reads as stale) with `hnr_db`, `voiced`, `tail_db`, `gap_db`, measured on `clean/vocals.wav` over the sung span. The dataset's phrase gate reads `hnr_db` (`phrase_gate.min_hnr_db`, separated audio only by default) - quality is judged per phrase, never per song |
 
+### S4b · dereverb — `signalml dereverb` (optional, separated audio only)
+| | |
+|---|---|
+| Input | `clean/vocals.wav` of records whose `source_quality` is in `configs/dereverb.yaml` `scope` (default `[separated]`; studio stems never), plus each `align/utterances<suffix>.json` / `phones<suffix>.json` |
+| Tool | a de-reverb model behind an injectable backend; the real one is an MSST BS-RoFormer (`signalml/restore/roformer.py`, model code vendored in `third_party/msst_roformer`, checkpoint under `DATA_ROOT/models/`), GPU, `restore` extra |
+| Output | `clean/vocals.dereverb.wav` (same rate and length as `clean/vocals.wav`, so every alignment stays valid); `dereverb` section in `analysis.json` (model, checkpoint sha256, device); `align/dereverb<suffix>.json` beside each utterances file: one verdict per phrase (same order, window copied in) with before/after `hnr_db` / `tail_db` / `gap_db` / level, pitch change in cents, voiced overlap, `keep` and `reason` |
+| Invariants | judged per phrase: `keep` only when the reverb measurably went down AND pitch and loudness held (`gate` in the config); `clean/vocals.wav` is never modified. The dataset build composes the two files per phrase only when the recipe opts in (`dereverb: {enabled: true}`), and the phrase gate then reads the HNR of the audio actually used |
+
 ### S6 · features — `signalml features`
 | | |
 |---|---|

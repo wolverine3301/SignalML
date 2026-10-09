@@ -38,6 +38,9 @@ from pydantic import BaseModel, Field, field_validator
 from ..config import CONFIGS_DIR, active_profile
 from ..manifest import Manifest, ManifestRecord
 from .common import song_dir
+from .dereverb import OUT_NAME as DEREVERB_WAV
+from .dereverb import compose as compose_dereverb
+from .dereverb import load_verdicts as load_dereverb_verdicts
 from .phrase_quality import load_quality, quality_name
 
 SP = "SP"  # silence token (DiffSinger global phoneme)
@@ -213,6 +216,18 @@ def phrase_fails(u: dict, gate: PhraseGate) -> str | None:
     return None
 
 
+class DereverbUse(BaseModel):
+    """Use ``signalml dereverb`` output: kept phrases come from clean/vocals.dereverb.wav.
+
+    Only records whose ``source_quality`` is in ``scope`` and that have current verdicts
+    (``align/dereverb*.json`` for the alignment this build reads) are composed; others
+    use the original audio and are counted in the card. The phrase gate's HNR test
+    reads the de-reverbed HNR for kept phrases, so wet-but-clean singing can pass it."""
+
+    enabled: bool = False
+    scope: list[str] = ["separated"]
+
+
 class DatasetRecipe(BaseModel):
     name: str
     trainer: Literal["acoustic", "variance"] = "acoustic"
@@ -225,6 +240,7 @@ class DatasetRecipe(BaseModel):
     # alignment records mode "phrases" - the multitrack imports).
     alignment_variant: str | None = None
     phrase_gate: PhraseGate = Field(default_factory=PhraseGate)
+    dereverb: DereverbUse = Field(default_factory=DereverbUse)
     test_clips_per_speaker: int = 2
     trainer_opts: TrainerOpts = Field(default_factory=TrainerOpts)
 
@@ -267,6 +283,9 @@ class BuildSummary:
     dropped_clips: int = 0  # noise/too-short/unsplittable
     gated_phrases: dict[str, int] = field(default_factory=dict)  # reason -> count
     gated_sec: float = 0.0
+    dereverb_songs: int = 0      # songs composed from de-reverbed phrases
+    dereverb_phrases: int = 0    # phrases taken from the de-reverbed audio
+    dereverb_missing: int = 0    # in scope but no current verdicts: original audio used
 
 
 @dataclass(frozen=True)
@@ -578,6 +597,10 @@ def _cut_all(
                         f"{quality_name(utts_path.name)} (signalml quality writes it)")
                     continue
                 utts = [{**u, "hnr_db": q["hnr_db"]} for u, q in zip(utts, quality)]
+                verdicts = _dereverb_verdicts(rec, recipe, data_root, suffix)
+                if verdicts is not None:  # judge the audio the clip will actually use
+                    utts = [{**u, "hnr_db": v["after"]["hnr_db"]} if v["keep"] else u
+                            for u, v in zip(utts, verdicts)]
             for u in utts:
                 why = phrase_fails(u, gate)
                 if why:
@@ -596,6 +619,20 @@ def _cut_all(
         cut[rec.id] = (clips, dropped)
         kept.append(rec)
     return kept, cut
+
+
+def _dereverb_verdicts(rec: ManifestRecord, recipe: DatasetRecipe, data_root: Path,
+                       suffix: str) -> list[dict] | None:
+    """The current de-reverb verdicts for the alignment this build reads, or None."""
+    use = recipe.dereverb
+    if not use.enabled or rec.meta.source_quality not in use.scope:
+        return None
+    sdir = song_dir(data_root, rec.id)
+    utts_path = sdir / "align" / f"utterances{suffix}.json"
+    if not (utts_path.exists() and (sdir / "clean" / DEREVERB_WAV).exists()):
+        return None
+    utts = json.loads(utts_path.read_text(encoding="utf-8"))
+    return load_dereverb_verdicts(utts_path.parent, utts_path.name, utts)
 
 
 def _drop_thin_singers(
@@ -683,6 +720,17 @@ def build(
     for rec in selected:
         sdir = song_dir(data_root, rec.id)
         audio, sr = sf.read(str(sdir / "clean" / "vocals.wav"), dtype="float32")
+        if recipe.dereverb.enabled and rec.meta.source_quality in recipe.dereverb.scope:
+            suffix = (_variant_suffix(data_root, rec.id, recipe.alignment_variant) or ""
+                      if recipe.alignment_variant else "")
+            verdicts = _dereverb_verdicts(rec, recipe, data_root, suffix)
+            if verdicts is None:
+                summary.dereverb_missing += 1
+            elif any(v["keep"] for v in verdicts):
+                derev, _ = sf.read(str(sdir / "clean" / DEREVERB_WAV), dtype="float32")
+                audio = compose_dereverb(audio, derev, sr, verdicts)
+                summary.dereverb_songs += 1
+                summary.dereverb_phrases += sum(v["keep"] for v in verdicts)
         clips, dropped = cut[rec.id]
         summary.dropped_clips += dropped
 
@@ -847,6 +895,11 @@ def _write_card(
         + (f"{sum(summary.gated_phrases.values())} phrase(s), "
            f"{summary.gated_sec / 60:.1f} min left out {dict(summary.gated_phrases)}"
            if recipe.phrase_gate.enabled else "off"),
+        "- dereverb: " + (
+            f"{summary.dereverb_phrases} phrase(s) in {summary.dereverb_songs} song(s) "
+            f"from clean/{DEREVERB_WAV}; {summary.dereverb_missing} in-scope song(s) "
+            f"without current verdicts used the original"
+            if recipe.dereverb.enabled else "off"),
         f"- align_score range: {min(align_scores):.3f}–{max(align_scores):.3f}"
         if align_scores else "- align_score range: n/a",
         "\n## Recipe\n\n```yaml",

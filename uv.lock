@@ -92,6 +92,15 @@ wheels = [
 ]
 
 [[package]]
+name = "beartype"
+version = "0.22.9"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/94/1009e248bbfbab11397abca7193bea6626806be9a327d399810d523a07cb/beartype-0.22.9.tar.gz", hash = "sha256:8f82b54aa723a2848a56008d18875f91c1db02c32ef6a62319a002e3e25a975f", size = 1608866, upload-time = "2025-12-13T06:50:30.72Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/71/cc/18245721fa7747065ab478316c7fea7c74777d07f37ae60db2e84f8172e8/beartype-0.22.9-py3-none-any.whl", hash = "sha256:d16c9bbc61ea14637596c5f6fbff2ee99cbe3573e46a716401734ef50c3060c2", size = 1333658, upload-time = "2025-12-13T06:50:28.266Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.6.17"
 source = { registry = "https://pypi.org/simple" }
@@ -1443,6 +1452,19 @@ wheels = [
 ]
 
 [[package]]
+name = "rotary-embedding-torch"
+version = "0.9.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fc/63/776d55b395aed9d2815afc1740056e919691d1be1ceee203d101d33d1674/rotary_embedding_torch-0.9.1.tar.gz", hash = "sha256:f43c39cd9c0aaa17d47e876db89a552a203dd8af35e7980f484ab7ad7ea8bf69", size = 13246, upload-time = "2026-06-20T23:39:14.667Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ea/63/ca681366df98d207876c6ad7761ef6910668c83ec766fd5a70c56b9c3567/rotary_embedding_torch-0.9.1-py3-none-any.whl", hash = "sha256:489ef53e21ab4c4eb35c0c97b551d724f5eea71c2bca39acb8fee8d88b142a76", size = 17423, upload-time = "2026-06-20T23:39:13.427Z" },
+]
+
+[[package]]
 name = "ruff"
 version = "0.15.20"
 source = { registry = "https://pypi.org/simple" }
@@ -1673,6 +1695,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+restore = [
+    { name = "beartype" },
+    { name = "einops" },
+    { name = "packaging" },
+    { name = "rotary-embedding-torch" },
+]
 train = [
     { name = "demucs" },
     { name = "torch" },
@@ -1688,16 +1716,20 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beartype", marker = "extra == 'restore'", specifier = ">=0.18" },
     { name = "demucs", marker = "extra == 'train'", specifier = ">=4.0.1" },
+    { name = "einops", marker = "extra == 'restore'", specifier = ">=0.8" },
     { name = "librosa", specifier = ">=0.10" },
     { name = "mido", specifier = ">=1.3" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "packaging", marker = "extra == 'restore'", specifier = ">=23" },
     { name = "praat-parselmouth", specifier = ">=0.4.7" },
     { name = "praatio", specifier = ">=6.0" },
     { name = "pydantic", specifier = ">=2.5" },
     { name = "pyloudnorm", specifier = ">=0.1.1" },
     { name = "pypdf", specifier = ">=6.19.0" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rotary-embedding-torch", marker = "extra == 'restore'", specifier = ">=0.6" },
     { name = "scipy", specifier = ">=1.11" },
     { name = "soundfile", specifier = ">=0.12" },
     { name = "torch", marker = "extra == 'train'", specifier = ">=2.7" },
@@ -1706,7 +1738,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.66" },
     { name = "yt-dlp", specifier = ">=2025.1.1" },
 ]
-provides-extras = ["train"]
+provides-extras = ["train", "restore"]
 
 [package.metadata.requires-dev]
 dev = [

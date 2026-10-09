@@ -32,6 +32,13 @@ train = [
     "torchaudio>=2.7",
     "torchcrepe>=0.0.22",
 ]
+# Restoration backends (signalml/restore: the vendored MSST RoFormer); needs `train` for torch.
+restore = [
+    "beartype>=0.18",
+    "einops>=0.8",
+    "packaging>=23",
+    "rotary-embedding-torch>=0.6",
+]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.4"]
