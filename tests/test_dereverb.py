@@ -256,3 +256,13 @@ def test_stage_feeds_the_stereo_stem(tmp_path, make_wav):
     assert stub.shapes[-1] == (len(wet),)
     info = json.loads((sdir / "analysis.json").read_text(encoding="utf-8"))["dereverb"]
     assert info["source"] == "clean/vocals.wav"
+
+
+def test_target_stem_takes_either_output_layout():
+    from signalml.restore.roformer import target_stem
+
+    bs = np.arange(2 * 3 * 2 * 10, dtype=np.float32).reshape(2, 3, 2, 10)  # (B, stems, C, T)
+    np.testing.assert_array_equal(target_stem(bs, 1, 10), bs[:, 1])
+    mel = np.ones((2, 2, 8), dtype=np.float32)  # (B, C, T), iSTFT came back 2 short
+    out = target_stem(mel, 0, 10)
+    assert out.shape == (2, 2, 10) and np.all(out[..., 8:] == 0)

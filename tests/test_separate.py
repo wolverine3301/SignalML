@@ -122,3 +122,33 @@ def test_load_separate_config_defaults_and_file(tmp_path):
     assert cfg.model == "htdemucs"
     assert cfg.device == "cpu"
     assert cfg.shifts == 1  # default preserved
+
+
+def test_a_two_stem_backend_only_needs_vocals(data_root):
+    """RoFormer vocal models return vocals + instrumental; that is a complete S3 run."""
+    fake = FakeSeparator(stems=("vocals", "instrumental"))
+    summary = separate(data_root, separator_factory=fake.factory)
+    assert sorted(summary.separated) == ["sng_0001", "sng_0002"]
+    for rid in summary.separated:
+        stems_dir = data_root / "songs" / rid / "stems"
+        assert sorted(p.name for p in stems_dir.iterdir()) == ["instrumental.wav",
+                                                               "vocals.wav"]
+        analysis = json.loads((data_root / "songs" / rid / "analysis.json").read_text())
+        assert analysis["separate"]["stems"] == ["instrumental", "vocals"]
+
+
+def test_roformer_backend_needs_its_checkpoint(tmp_path):
+    from signalml.stages.separate import SeparateConfig, build_roformer_separator
+
+    with pytest.raises(ValueError, match="checkpoint"):
+        build_roformer_separator(SeparateConfig(backend="roformer"), tmp_path)
+
+
+@pytest.mark.parametrize("name", ["separate.roformer_bs.yaml", "separate.roformer_mel.yaml"])
+def test_roformer_configs_load(name):
+    from signalml.config import CONFIGS_DIR
+    from signalml.stages.separate import load_separate_config
+
+    cfg = load_separate_config(CONFIGS_DIR / name)
+    assert cfg.backend == "roformer" and cfg.checkpoint and cfg.model_yaml
+    assert cfg.arch in ("bs_roformer", "mel_band_roformer")

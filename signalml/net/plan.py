@@ -372,7 +372,8 @@ def build_plan(
             if with_features:
                 wanted.append("features/vocals.npz")
             if what == "full":
-                wanted += [f"stems/{s}.wav" for s in ("vocals", "drums", "bass", "other")]
+                wanted += [f"stems/{s}.wav" for s in ("vocals", "drums", "bass", "other",
+                                                      "instrumental")]
             for rec in records:
                 sdir = data_root / "songs" / rec.id
                 for rel in wanted:

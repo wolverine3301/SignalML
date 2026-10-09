@@ -82,6 +82,7 @@ class DereverbConfig(BaseModel):
     device: str = "auto"
     batch_size: int = 2
     num_overlap: int | None = None
+    arch: str = "bs_roformer"  # or mel_band_roformer (the checkpoint's architecture)
     # "stems": the stereo separated stem (falls back to the clean vocal when the stem is
     # missing, mono, or not the clean vocal's source); "clean": always the mono clean vocal
     source: Literal["stems", "clean"] = "stems"
@@ -112,8 +113,8 @@ def make_backend(config: DereverbConfig, data_root: str | Path) -> tuple[Derever
         return Path(p) if Path(p).is_absolute() else root / p
 
     runner = RoformerRunner(resolve(config.checkpoint), resolve(config.model_yaml),
-                            device=config.device, batch_size=config.batch_size,
-                            num_overlap=config.num_overlap)
+                            arch=config.arch, device=config.device,
+                            batch_size=config.batch_size, num_overlap=config.num_overlap)
     return runner, {"model": config.model, **runner.info}
 
 

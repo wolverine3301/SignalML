@@ -1,0 +1,15 @@
+# S3 with a Mel-band RoFormer vocal model (bake-off candidate B). Use: signalml separate
+# --config configs/separate.roformer_mel.yaml. Paths resolve against DATA_ROOT.
+# KimberleyJensen MelBandRoformer - huggingface.co/KimberleyJSN/melbandroformer
+#   revision ac9b0614ab3cd7f77219e18ba494dfd93956c348, licence mit (model card)
+#   sha256 87201f4d31afb5bc79993230fc49446918425574db48c01c405e44f365c7559e (913 MB)
+#   config: ZFTurbo/Music-Source-Separation-Training @84b1eac configs/KimberleyJensen/
+#   MSST multisong vocals SDR 10.98
+backend: roformer
+model: mel_roformer_kim
+arch: mel_band_roformer
+checkpoint: models/sep_mel_roformer_kim/MelBandRoformer.ckpt
+model_yaml: models/sep_mel_roformer_kim/config.yaml
+device: auto
+batch_size: 2
+num_overlap: null

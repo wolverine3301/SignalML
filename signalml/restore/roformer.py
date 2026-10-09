@@ -27,6 +27,20 @@ THIRD_PARTY = CONFIGS_DIR.parent / "third_party"
 
 # fn(batch (B, C, chunk)) -> (B, C, chunk)
 ChunkFn = Callable[[np.ndarray], np.ndarray]
+ARCHES = ("bs_roformer", "mel_band_roformer")
+
+
+def target_stem(y: np.ndarray, stem_index: int, length: int) -> np.ndarray:
+    """A model's output -> (B, C, length) of the wanted stem.
+
+    BS-RoFormer returns (B, stems, C, T); Mel-band RoFormer squeezes a single stem to
+    (B, C, T). The iSTFT can come back a few samples short of the input: zero-pad."""
+    y = np.asarray(y)
+    if y.ndim == 4:
+        y = y[:, stem_index]
+    if y.shape[-1] < length:
+        y = np.pad(y, ((0, 0), (0, 0), (0, length - y.shape[-1])))
+    return y[..., :length]
 
 
 class _MsstLoader(yaml.SafeLoader):
@@ -98,21 +112,27 @@ def file_sha256(path: str | Path) -> str:
 
 
 class RoformerRunner:
-    """A loaded MSST BS-RoFormer. ``runner(audio, sr)`` returns the target stem, mono.
+    """A loaded MSST RoFormer (``arch``: BS or Mel-band). ``runner(audio, sr)`` returns
+    the target stem mixed to mono; ``runner.separate(audio, sr)`` keeps its channels.
 
     ``audio`` is mono (T,) or (C, T) at the model's sample rate (no silent resampling:
     the caller passes prod-profile audio, and a mismatch is an error). Mono input is
-    duplicated for a stereo model and the output channels are averaged.
+    duplicated for a stereo model.
     """
 
     def __init__(self, checkpoint: str | Path, model_config: str | Path, *,
-                 device: str = "auto", batch_size: int = 2, num_overlap: int | None = None,
-                 use_amp: bool = True):
+                 arch: str = "bs_roformer", device: str = "auto", batch_size: int = 2,
+                 num_overlap: int | None = None, use_amp: bool = True):
         import torch
 
+        if arch not in ARCHES:
+            raise ValueError(f"arch {arch!r} not in {ARCHES}")
         if str(THIRD_PARTY) not in sys.path:
             sys.path.insert(0, str(THIRD_PARTY))
-        from msst_roformer.bs_roformer import BSRoformer
+        if arch == "bs_roformer":
+            from msst_roformer.bs_roformer import BSRoformer as Model
+        else:
+            from msst_roformer.mel_band_roformer import MelBandRoformer as Model
 
         cfg = load_msst_config(model_config)
         audio_cfg, model_cfg = cfg["audio"], cfg["model"]
@@ -134,7 +154,7 @@ class RoformerRunner:
         self.device = torch.device(device)
         self.use_amp = use_amp and self.device.type == "cuda"
 
-        model = BSRoformer(**model_cfg)
+        model = Model(**model_cfg)
         state = torch.load(str(checkpoint), map_location="cpu", weights_only=True)
         if isinstance(state, dict) and "state_dict" in state:
             state = state["state_dict"]
@@ -142,6 +162,7 @@ class RoformerRunner:
         self.model = model.eval().to(self.device)
         self._torch = torch
         self.info = {
+            "arch": arch,
             "checkpoint": Path(checkpoint).name,
             "checkpoint_sha256": file_sha256(checkpoint),
             "target": self.target,
@@ -158,18 +179,20 @@ class RoformerRunner:
         with torch.inference_mode(), torch.autocast(
                 self.device.type, dtype=torch.float16, enabled=self.use_amp):
             y = self.model(torch.from_numpy(batch).to(self.device))
-        # (B, stems, channels, T) -> (B, channels, T)
-        return y[:, self.stem_index].float().cpu().numpy()
+        return target_stem(y.float().cpu().numpy(), self.stem_index, batch.shape[-1])
 
-    def __call__(self, audio: np.ndarray, sr: int) -> np.ndarray:
+    def separate(self, audio: np.ndarray, sr: int) -> np.ndarray:
+        """The target stem, (C, T) in the model's channel layout."""
         if sr != self.sample_rate:
             raise ValueError(f"model runs at {self.sample_rate} Hz, got {sr} Hz audio "
-                             f"(restoration runs on prod-profile clean audio)")
+                             f"(pass audio at the model's rate)")
         x = np.asarray(audio, dtype=np.float32)
         x = x[None, :] if x.ndim == 1 else x
         if self.stereo and x.shape[0] == 1:
             x = np.repeat(x, 2, axis=0)
         elif not self.stereo and x.shape[0] > 1:
             x = x.mean(axis=0, keepdims=True)
-        y = chunked_apply(x, self._run, self.chunk, self.overlap, self.batch_size)
-        return y.mean(axis=0).astype(np.float32)
+        return chunked_apply(x, self._run, self.chunk, self.overlap, self.batch_size)
+
+    def __call__(self, audio: np.ndarray, sr: int) -> np.ndarray:
+        return self.separate(audio, sr).mean(axis=0).astype(np.float32)
