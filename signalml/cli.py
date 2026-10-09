@@ -317,12 +317,17 @@ def _cmd_manifest_import_gtsinger(args: argparse.Namespace) -> int:
     genders = [g.strip() for g in args.genders.split(",") if g.strip()]
     manifest, new_records, skipped, groups = import_gtsinger(
         resolve_data_root(args.data_root), root=args.path, genders=genders,
-        limit=args.limit, dry_run=args.dry_run)
+        language=args.language, limit=args.limit, dry_run=args.dry_run)
     singers = sorted({g.singer for g in groups})
     print(f"{len(groups)} take(s) from {len(singers)} singer(s) {singers}")
+    native = {k: r for k, r in skipped.items() if r.startswith("native:")}
     for label, reason in sorted(skipped.items()):
-        if "checksum" not in reason and "spoken reading" not in reason:
+        if "checksum" not in reason and "spoken reading" not in reason \
+                and label not in native:
             print(f"  SKIPPED {label}: {reason}", file=sys.stderr)
+    if native:
+        print(f"  {len(native)} take(s) imported UNALIGNED with align/phones.native.json "
+              f"(no IPA mapping): e.g. {next(iter(native.values()))}")
     if args.dry_run:
         print(f"import-gtsinger (dry run): {len(groups)} take(s) would be imported")
         return 0
@@ -330,9 +335,12 @@ def _cmd_manifest_import_gtsinger(args: argparse.Namespace) -> int:
     failed = sum(1 for r in skipped.values() if r.startswith("failed"))
     print(f"import-gtsinger: {len(new_records)} imported, {failed} failed, "
           f"{len(manifest)} records total")
-    if new_records:
+    if any(r.status.aligned for r in new_records):
         print("next: signalml clean --profile prod (aligned already: manual TextGrids). "
               "Licence CC BY-NC-SA 4.0 - non-commercial.")
+    if native:
+        print("unaligned takes: clean --profile prod, then either a reviewed phone mapping "
+              "of phones.native.json or the normal Whisper -> align path for that language")
     return 1 if failed and not new_records else 0
 
 
@@ -367,6 +375,9 @@ def _cmd_manifest_import_acapella(args: argparse.Namespace) -> int:
     name = args.corpus_name
     if name == "ravdess":
         from .ingest.ravdess import import_ravdess as run
+        kwargs = {"genders": split(args.genders)}
+    elif name == "m4singer":
+        from .ingest.m4singer import import_m4singer as run
         kwargs = {"genders": split(args.genders)}
     else:
         from .ingest.vocadito import import_vocadito as run
@@ -1355,6 +1366,9 @@ def main(argv: list[str] | None = None) -> int:
     gts_p.add_argument("--genders", default="F",
                        help="comma list F,M - from the voice part in the singer folder "
                             "(Alto/Soprano = F, Tenor/Bass = M; default: F)")
+    gts_p.add_argument("--language", default="English",
+                       help="GTSinger language folder (English default; French, German, "
+                            "... keep MFA IPA phones; Chinese pinyin stays native)")
     gts_p.add_argument("--limit", type=int, default=None,
                        help="import at most N takes (smoke tests)")
     gts_p.add_argument("--dry-run", action="store_true",
@@ -1380,14 +1394,17 @@ def main(argv: list[str] | None = None) -> int:
         ("vocadito", "onboard vocadito solo-singing excerpts with lyrics, note and F0 "
                      "annotations (device recordings: source_quality unset)",
          "extracted vocadito.zip (holds vocadito_metadata.csv, Audio/, Annotations/)"),
+        ("m4singer", "onboard M4Singer (Mandarin, 20 singers M/F); its pinyin phone + "
+                     "note alignment is kept as align/phones.native.json, not converted",
+         "extracted m4singer.zip (the folder holding meta.json and Singer#Song/)"),
     ):
         ac_p = manifest_sub.add_parser(f"import-{name}", help=help_text)
         ac_p.add_argument("--data-root", default=None,
                           help="data root (default: $SIGNALML_DATA_ROOT or ./data)")
         ac_p.add_argument("--path", required=True, help=path_help)
-        if name == "ravdess":
+        if name in ("ravdess", "m4singer"):
             ac_p.add_argument("--genders", default="F,M",
-                              help="comma list (odd actor ids M, even F; default F,M)")
+                              help="comma list F,M (default both)")
         else:
             ac_p.add_argument("--languages", default="en",
                               help="comma list of ISO codes to import (default en)")

@@ -52,6 +52,10 @@ class Take:
     processing: Literal["dry", "produced", "heavy"] | None = "dry"
     sidecars: list[Path] = field(default_factory=list)  # annotation files kept beside the take
     extra: dict = field(default_factory=dict)            # corpus labels -> analysis.json
+    # the corpus' own phone/note alignment in a phone set we have no IPA mapping for
+    # yet -> align/phones.native.json. Never phones.json: nothing downstream reads it,
+    # status.aligned stays false, so the normal align path still applies.
+    native_alignment: dict | None = None
 
     @property
     def filename(self) -> str:
@@ -154,6 +158,11 @@ def import_takes(
                 "license": license_note, "date": today})
             if take.extra:
                 update_analysis(sdir, "import", json.loads(json.dumps(take.extra)))
+            if take.native_alignment:
+                (sdir / "align").mkdir(parents=True, exist_ok=True)
+                (sdir / "align" / "phones.native.json").write_text(
+                    json.dumps(take.native_alignment, ensure_ascii=False, indent=1),
+                    encoding="utf-8")
             manifest.add(rec)
             new_records.append(rec)
         except Exception as exc:  # one bad take must not stop the corpus

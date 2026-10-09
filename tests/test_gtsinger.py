@@ -56,6 +56,57 @@ def test_find_groups_skips_speech_and_other_genders(corpus):
     assert "EN-Tenor-1" in skipped and any("Paired_Speech" in k for k in skipped)
 
 
+def _phrase_with(path: Path, make_wav, words, phones, hz: float = 220.0) -> None:
+    make_wav(path.with_suffix(".wav"), seconds=2.0, hz=hz)
+    tg = praatio_tg.Textgrid()
+    tg.addTier(praatio_tg.IntervalTier("word", words, 0, 2.0))
+    tg.addTier(praatio_tg.IntervalTier("phone", phones, 0, 2.0))
+    tg.save(str(path.with_suffix(".TextGrid")), format="long_textgrid",
+            includeBlankSpaces=True)
+
+
+def test_ipa_language_writes_phones_json(tmp_path, make_wav):
+    src = tmp_path / "GTSinger"
+    _phrase_with(src / "French" / "FR-Tenor-9" / "Vibrato" / "phare" / "Control_Group" / "0000",
+                 make_wav, [(0.2, 1.8, "phare")],
+                 [(0.2, 0.6, "f"), (0.6, 1.4, "a"), (1.4, 1.8, "ʁ")])
+    root = tmp_path / "dr"
+    manifest, new, skipped, _ = import_gtsinger(root, root=src, genders=("M",),
+                                                language="French")
+    rec = new[0]
+    assert rec.meta.language == "fr" and rec.status.aligned
+    ph = json.loads((song_dir(root, rec.id) / "align" / "phones.json").read_text("utf-8"))
+    assert ph["phone_set"] == "mfa_ipa/fr_v1" and [p["ph"] for p in ph["phones"]] == \
+        ["f", "a", "ʁ"]
+
+
+def test_pinyin_and_unmappable_phones_stay_native(tmp_path, make_wav):
+    src = tmp_path / "GTSinger"
+    _phrase_with(src / "Chinese" / "ZH-Tenor-9" / "Vibrato" / "灯塔" / "Control_Group" / "0000",
+                 make_wav, [(0.2, 1.0, "灯"), (1.0, 1.8, "塔")],
+                 [(0.2, 0.4, "d"), (0.4, 1.0, "eng"), (1.0, 1.2, "t"), (1.2, 1.8, "a")])
+    _phrase_with(src / "English" / "EN-Tenor-9" / "Vibrato" / "kestrel" / "Control_Group"
+                 / "0000", make_wav, [(0.2, 1.8, "sea")],
+                 [(0.2, 0.8, "S"), (0.8, 1.8, "QQ1")], hz=300.0)
+    root = tmp_path / "dr"
+    for language, code, native_set in (("Chinese", "zh", "opencpop_pinyin"),
+                                       ("English", "en", "gtsinger_en")):
+        _, new, skipped, _ = import_gtsinger(root, root=src, genders=("M",),
+                                             language=language)
+        rec = new[0]
+        assert rec.meta.language == code and not rec.status.aligned
+        sdir = song_dir(root, rec.id)
+        assert not (sdir / "align" / "phones.json").exists()
+        native = json.loads((sdir / "align" / "phones.native.json").read_text("utf-8"))
+        assert native["phone_set"] == native_set
+        assert any(r.startswith("native:") for r in skipped.values())
+        if language == "English":
+            assert native["exceptions"] == ["'QQ1'"]
+            assert [p["ph"] for p in native["phones"]] == ["S", "QQ1"]  # not guessed
+        else:
+            assert (root / rec.meta.lyrics_path).read_text("utf-8").strip() == "灯塔"
+
+
 def test_male_singers_import_with_genders_m(corpus, tmp_path):
     root = tmp_path / "dr"
     manifest, new, _, groups = import_gtsinger(root, root=corpus, genders=("M",))

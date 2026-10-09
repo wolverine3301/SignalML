@@ -17,6 +17,15 @@ so neither Whisper nor MFA runs on these songs. It is written both as the canoni
 alignment and as the ``phrase`` variant (one utterance per phrase, with the per-phrase
 health numbers), so recipes on either reach it. ``Paired_Speech_Group`` (the lyrics
 read aloud) is skipped: it is speech, not singing.
+
+Other languages (``--language``): French, German, Italian, ... label phones in MFA's
+IPA already, so they are validated (every character must be an IPA letter or
+diacritic) and written as ``phones.json`` with phone set ``mfa_ipa/<code>_v1``.
+Chinese uses Opencpop-style pinyin, which has no reviewed IPA mapping here: those
+groups - and any group with a phone label that fails conversion or validation - keep
+the corpus alignment as ``align/phones.native.json`` (with an ``exceptions`` list)
+and stay ``aligned=false``; nothing is guessed. The authors' per-language zips
+(Google Drive, linked from the HF README) extract to the same ``<Language>/...`` tree.
 """
 
 from __future__ import annotations
@@ -82,6 +91,42 @@ def arpabet_to_ipa(label: str) -> str:
     return _ARPABET[base]
 
 
+LANGUAGES = {"English": "en", "Chinese": "zh", "French": "fr", "German": "de",
+             "Italian": "it", "Japanese": "ja", "Korean": "ko", "Russian": "ru",
+             "Spanish": "es"}
+NATIVE_PHONE_SETS = {"Chinese": "opencpop_pinyin"}  # no reviewed IPA mapping yet
+_NOT_IPA = ("CJK", "HANGUL", "HIRAGANA", "KATAKANA", "CYRILLIC", "GREEK CAPITAL")
+
+
+def ipa_label(label: str) -> str:
+    """An MFA IPA phone label, validated: lowercase letters and IPA diacritics only."""
+    import unicodedata
+
+    label = label.strip()
+    for ch in label:
+        cat = unicodedata.category(ch)
+        name = unicodedata.name(ch, "")
+        if not (cat in ("Ll", "Lm", "Lo", "Mn", "Sk") or ch == "ː") or \
+                any(k in name for k in _NOT_IPA):
+            raise ValueError(f"not an IPA phone: {label!r}")
+    if not label:
+        raise ValueError("empty phone label")
+    return label
+
+
+def converter(language: str):
+    """Phone-label conversion for one GTSinger language; None = keep it native."""
+    if language == "English":
+        return arpabet_to_ipa
+    if language in NATIVE_PHONE_SETS:
+        return None
+    return ipa_label
+
+
+def phone_set_for(language: str) -> str:
+    return PHONE_SET if language == "English" else f"mfa_ipa/{LANGUAGES[language]}_v1"
+
+
 def gender_of(singer: str) -> str | None:
     part = singer.lower()
     if any(p in part for p in _FEMALE_PARTS):
@@ -100,8 +145,10 @@ def textgrid_for(wav: Path) -> Path | None:
     return None
 
 
-def textgrid_phones(path: Path, offset: float = 0.0) -> tuple[list[dict], list[str]]:
-    """(phones.json entries, words) of one phrase TextGrid, shifted by ``offset``."""
+def textgrid_phones(path: Path, offset: float = 0.0,
+                    convert=arpabet_to_ipa) -> tuple[list[dict], list[str]]:
+    """(phones.json entries, words) of one phrase TextGrid, shifted by ``offset``.
+    ``convert=None`` keeps the corpus' own labels (raises nothing on unknown phones)."""
     from praatio import textgrid as praatio_tg
 
     tg = praatio_tg.openTextgrid(str(path), includeEmptyIntervals=False)
@@ -119,7 +166,8 @@ def textgrid_phones(path: Path, offset: float = 0.0) -> tuple[list[dict], list[s
         label = e.label.strip()
         if label in _SILENT:
             continue
-        phones.append({"ph": arpabet_to_ipa(label), "start": round(offset + e.start, 4),
+        phones.append({"ph": convert(label) if convert else label,
+                       "start": round(offset + e.start, 4),
                        "end": round(offset + e.end, 4), "word": word_at((e.start + e.end) / 2),
                        "stress": None})
     return phones, [w for _, _, w in words]
@@ -189,15 +237,21 @@ def import_gtsinger(
     *,
     root: str | Path,
     genders: Sequence[str] = ("F",),
+    language: str = "English",
     limit: int | None = None,
     dry_run: bool = False,
 ) -> tuple[Manifest, list[ManifestRecord], dict[str, str], list[Group]]:
-    """Import GTSinger's English singing takes, aligned. Caller saves the manifest.
+    """Import GTSinger's singing takes for one language. Caller saves the manifest.
 
     Returns ``(manifest, new_records, skipped, selected)``. Idempotent: a group whose
-    joined WAV is already in the manifest (by checksum) is skipped."""
+    joined WAV is already in the manifest (by checksum) is skipped. Groups whose phones
+    cannot be converted to IPA are imported with ``align/phones.native.json`` instead
+    (``skipped`` notes them with a ``native:`` reason, the record is still added)."""
     data_root = Path(data_root)
-    groups, skipped = find_groups(root, genders=genders)
+    if language not in LANGUAGES:
+        raise ValueError(f"unknown GTSinger language {language!r} (one of {list(LANGUAGES)})")
+    lang_code, convert = LANGUAGES[language], converter(language)
+    groups, skipped = find_groups(root, language=language, genders=genders)
     if limit is not None:
         groups = groups[:limit]
     manifest = Manifest.for_data_root(data_root)
@@ -215,11 +269,20 @@ def import_gtsinger(
             utts: list[Utterance] = []
             lines: list[str] = []
             audio, sr, offsets = _join(g.segments)
+            native, exceptions = convert is None, set()
+            if convert is not None:  # one unconvertible label sends the group native
+                for seg in g.segments:
+                    try:
+                        textgrid_phones(textgrid_for(seg), 0.0, convert)
+                    except ValueError as exc:
+                        native = True
+                        exceptions.add(str(exc).split(": ", 1)[-1])
             for seg, off in zip(g.segments, offsets):
-                ph, words = textgrid_phones(textgrid_for(seg), off)
+                ph, words = textgrid_phones(textgrid_for(seg), off,
+                                            None if native else convert)
                 phones += ph
-                if ph and words:
-                    lines.append(" ".join(words))
+                if ph and words:  # Chinese / Japanese word tiers hold single characters
+                    lines.append(("" if lang_code in ("zh", "ja") else " ").join(words))
                     utts.append(Utterance(round(off, 3), round(off + sf.info(str(seg)).duration, 3),
                                           lines[-1], (len(lines) - 1,)))
             if not phones:
@@ -242,7 +305,7 @@ def import_gtsinger(
                     singer=_normalize_singer(f"{CORPUS}-{g.singer}"),
                     gender=gender_of(g.singer),
                     song=f"{g.song} [{g.technique} / {g.group}]",
-                    language="en",
+                    language=lang_code,
                     license_note=LICENSE_NOTE,
                     has_lyrics=True,
                     lyrics_path=(rel_dir / "lyrics.txt").as_posix(),
@@ -254,24 +317,37 @@ def import_gtsinger(
                 ),
             )
             rec.status.separated = True   # studio a cappella: nothing to separate
-            rec.status.aligned = True     # manual alignment, converted below
-            rec.quality.align_score = 1.0
             sdir = song_dir(data_root, rec.id)
             (sdir / "stems").mkdir(parents=True, exist_ok=True)
             shutil.copyfile(wav, sdir / "stems" / "vocals.wav")
-            payload = {"phone_set": PHONE_SET, "aligner": ALIGNER, "language": "en",
-                       "phones": phones}
+            update_analysis(sdir, "separate", {
+                "model": "gtsinger-acapella", "imported_from": [str(s) for s in g.segments],
+                "license": LICENSE_NOTE, "date": today})
             (sdir / "align").mkdir(parents=True, exist_ok=True)
+            if native:  # kept as the corpus labelled it; status.aligned stays false
+                native_set = NATIVE_PHONE_SETS.get(language, f"gtsinger_{lang_code}")
+                (sdir / "align" / "phones.native.json").write_text(json.dumps(
+                    {"phone_set": native_set, "aligner": ALIGNER, "language": lang_code,
+                     "exceptions": sorted(exceptions), "phones": phones},
+                    ensure_ascii=False, indent=1), encoding="utf-8")
+                skipped[g.label] = (f"native: imported unaligned, phones kept as "
+                                    f"{native_set}" + (f" (exceptions {sorted(exceptions)})"
+                                                       if exceptions else ""))
+                manifest.add(rec)
+                new_records.append(rec)
+                continue
+            rec.status.aligned = True     # manual alignment, converted below
+            rec.quality.align_score = 1.0
+            phone_set = phone_set_for(language)
+            payload = {"phone_set": phone_set, "aligner": ALIGNER, "language": lang_code,
+                       "phones": phones}
             for name in ("phones.json", "phones.phrase.json"):
                 (sdir / "align" / name).write_text(
                     json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             (sdir / "align" / "utterances.phrase.json").write_text(
                 json.dumps(utterance_health(utts, phones), ensure_ascii=False, indent=1),
                 encoding="utf-8")
-            update_analysis(sdir, "separate", {
-                "model": "gtsinger-acapella", "imported_from": [str(s) for s in g.segments],
-                "license": LICENSE_NOTE, "date": today})
-            align_info = {"aligner": ALIGNER, "mode": "given", "phone_set": PHONE_SET,
+            align_info = {"aligner": ALIGNER, "mode": "given", "phone_set": phone_set,
                           "n_phones": len(phones), "n_utterances": len(utts),
                           "align_score": 1.0,
                           "align_score_method": "manual alignment shipped with the corpus",

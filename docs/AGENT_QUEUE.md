@@ -65,6 +65,7 @@ Newest last. One line each: what it is, whether it's critical path, and the verd
 | Branch | Tier | What | Needs |
 |---|---|---|---|
 | `emotion-corpora-survey` | C (D10) | EARS + CREMA-D adapters, emotion contract, labeller calibration, 4,847 lines | Low urgency, and deliberately **left out of `main`** on rig day 2026-09-20. Rebase onto `main` when it is wanted |
+| `public-singing-datasets` (from `multitrack-import`) | A (data) | 2026-10-09 one-off: public singing sets downloaded + adapters — `import-ravdess`, `import-vocadito`, `import-m4singer`, `import-gtsinger --language/--genders M` (native-phone fallback), shared `ingest/acapella.py`, draft `dataset.full_v5.yaml`; survey in `notes/candidate_corpora.md` | Go-ahead for the live-manifest imports (commands in the private run notes); language call on the non-English sets; gated sets need Logan's own request |
 
 **Merged to `main` 2026-09-20** (rig day — Logan's call to land everything but the
 emotion branch): `rig-prep` (P7.3 `signalml train` wrapper, preflight, run records,
