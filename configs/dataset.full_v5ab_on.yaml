@@ -1,0 +1,53 @@
+# A/B (2026-10-09): full_v5 with dereverb ON - identical data otherwise, 20k steps, same seed.
+# Overlay: dataset.full_v5ab_on.local.yaml = a copy of dataset.full_v5.local.yaml.
+name: full_acoustic_v5ab_on
+trainer: acoustic
+profile: prod
+
+filters:
+  domain: sung
+  language: en
+  gender: null
+  min_align_score: 0.5
+  min_lyrics_agreement: 0.6
+  exclude_processing: [heavy]
+  corpora: []
+  exclude_corpora: [vocadito]
+  singers: []
+  exclude_singers: []   # set in the .local.yaml overlay
+  min_singer_minutes: 0.0
+  ids: []
+  exclude_ids: []       # set in the .local.yaml overlay
+
+alignment_variant: phrase
+phrase_gate:
+  enabled: true
+  drop_unsure_lyrics: false
+  min_hnr_db: 13.0           # 2026-10-08 blind calibration (40/44 agreement)
+  quality_scope: [separated]
+
+dereverb:
+  enabled: true
+  scope: [separated]
+
+segmentation:
+  split_gap_sec: 0.4
+  min_clip_sec: 1.0
+  max_clip_sec: 15.0
+  pad_sec: 0.15
+  inner_sp_min_sec: 0.05
+  drop_noise_clips: true
+  ph_num_mode: vowel_onset
+  phone_merge: consonant_core
+
+test_clips_per_speaker: 2
+
+trainer_opts:
+  # v4's 24 GB 4090 settings
+  max_batch_frames: 20000
+  max_batch_size: 32
+  binarization_workers: 8
+  max_updates: 20000
+  num_ckpt_keep: 5
+  permanent_ckpt_start: 5000
+  permanent_ckpt_interval: 5000
